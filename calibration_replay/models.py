@@ -104,6 +104,9 @@ class Plan:
     motion: MotionConfig = field(default_factory=MotionConfig)
     stability: StabilityConfig = field(default_factory=StabilityConfig)
     require_corners: bool = True
+    # 拍摄期间让灵巧手保持零位（经 8132 → 18089 周期下发全零）。标记贴在手上，
+    # 手指姿态变了标记就相对腕系移动，所以默认开。
+    hold_hand_zero: bool = True
     draft: bool = True
     version: int = PLAN_VERSION
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -138,6 +141,7 @@ class Plan:
             motion=MotionConfig(**value.get("motion", {})),
             stability=StabilityConfig(**value.get("stability", {})),
             require_corners=bool(value.get("require_corners", True)),
+            hold_hand_zero=bool(value.get("hold_hand_zero", True)),
             draft=bool(value.get("draft", True)),
             version=int(value.get("version", PLAN_VERSION)),
             metadata=dict(value.get("metadata", {})),

@@ -74,6 +74,35 @@ class HttpCaptureAdapter(CaptureAdapter):
     def _response_ok(payload: dict[str, Any]) -> bool:
         return bool(payload.get("ok", payload.get("success", True)))
 
+    def begin_hand_hold(self, hand_id: str | None, side: str) -> dict[str, Any] | None:
+        """拍摄期间让灵巧手保持零位：8132 /api/mount/hand-hold/start → 18089 周期下发全零。
+
+        只对 hand_eye_3D 有意义（2D 棋盘格与手指无关）。18089 被别的控制源占用时
+        8132 返回 409，这里原样抛出，由引擎当作预检失败——绝不抢占。"""
+        if self.target != "hand_eye_3D":
+            return None
+        if not hand_id:
+            raise RuntimeError(
+                "18000 has no active hand, cannot hold the hand at zero; "
+                "activate the hand in 18000 or disable hold_hand_zero in the plan"
+            )
+        result = self._request(
+            "POST", "/api/mount/hand-hold/start", {"hand_id": hand_id, "side": side}
+        )
+        hold = (result or {}).get("hold") or {}
+        if not hold.get("running"):
+            raise RuntimeError(f"hand hold did not start: {result}")
+        return hold
+
+    def end_hand_hold(self) -> None:
+        if self.target != "hand_eye_3D":
+            return
+        try:
+            self._request("POST", "/api/mount/hand-hold/stop", {})
+        except Exception:
+            # 收尾尽力而为；保持线程在 8132 里，下次 start 会幂等复用或报占用
+            pass
+
     def preflight(self, run_id: str) -> dict[str, Any]:
         health = self._request("GET", "/api/status")
         arm = self._request("GET", "/api/arm/status")
@@ -235,6 +264,14 @@ class MockCaptureAdapter(CaptureAdapter):
     def __init__(self):
         self.calls: list[dict[str, Any]] = []
         self.preflight_calls: list[str] = []
+        self.hand_hold_calls: list[tuple[str, Any]] = []
+
+    def begin_hand_hold(self, hand_id: str | None, side: str) -> dict[str, Any]:
+        self.hand_hold_calls.append(("start", {"hand_id": hand_id, "side": side}))
+        return {"running": True, "mock": True, "hand_id": hand_id, "side": side}
+
+    def end_hand_hold(self) -> None:
+        self.hand_hold_calls.append(("stop", None))
 
     def preflight(self, run_id: str) -> dict[str, Any]:
         self.preflight_calls.append(run_id)

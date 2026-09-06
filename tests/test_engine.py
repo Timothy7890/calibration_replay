@@ -166,3 +166,46 @@ def test_run_refuses_when_engaged_arm_differs_from_plan_arm():
     engine.start(plan, "right-arm")
     assert engine.wait(10) and engine.status()["state"] == "completed"
     assert engine.status()["arm"]["arm"] == "right"
+
+
+def test_hand_hold_starts_before_motion_and_stops_after_run():
+    bridge = MockArmBridge()
+    adapter = MockCaptureAdapter()
+    engine = ReplayEngine(
+        bridge, lambda _plan: adapter, sleep=lambda _s: None,
+        hand_id_provider=lambda: "inspire-1-left",
+    )
+    engine.engage()
+    plan = make_plan()
+    assert plan.hold_hand_zero is True          # 默认开：标记贴在手上
+    engine.start(plan, "hold-run")
+    assert engine.wait(2.0)
+    assert engine.status()["state"] == "completed"
+    assert adapter.hand_hold_calls[0] == ("start", {"hand_id": "inspire-1-left", "side": plan.arm})
+    assert adapter.hand_hold_calls[-1] == ("stop", None)
+    assert engine.status()["progress"]["hand_hold"]["running"] is True
+
+    # 关掉选项：完全不碰灵巧手
+    adapter2 = MockCaptureAdapter()
+    engine2 = ReplayEngine(bridge, lambda _plan: adapter2, sleep=lambda _s: None,
+                           hand_id_provider=lambda: "inspire-1-left")
+    plan2 = make_plan()
+    plan2.hold_hand_zero = False
+    engine2.start(plan2, "no-hold")
+    assert engine2.wait(2.0)
+    assert adapter2.hand_hold_calls == []
+
+
+def test_hand_hold_failure_is_a_preflight_fault():
+    class Refusing(MockCaptureAdapter):
+        def begin_hand_hold(self, hand_id, side):
+            raise RuntimeError("18089: 被视觉控制占用")
+
+    bridge = MockArmBridge()
+    engine = ReplayEngine(bridge, lambda _plan: Refusing(), sleep=lambda _s: None,
+                          hand_id_provider=lambda: "inspire-1-left")
+    engine.engage()
+    with pytest.raises(RuntimeError, match="hand hold failed"):
+        engine.start(make_plan(), "refused")
+    assert engine.status()["state"] == "fault"
+    assert bridge.read_sample()["q"] == [0.0] * 7     # 手臂没动

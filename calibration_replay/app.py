@@ -138,6 +138,12 @@ def create_app(
         adapter_factory,
         run_writer=store.write_run,
         run_dir_factory=store.create_run_dir,
+        # --mock：不访问 18000/18089，也不等手回零
+        hand_id_provider=(
+            (lambda: "mock-hand") if config.mock
+            else (lambda: fetch_capability(config.capability_url).get("hand_id"))
+        ),
+        hand_hold_settle_s=0.0 if config.mock else 1.5,
     )
 
     @asynccontextmanager

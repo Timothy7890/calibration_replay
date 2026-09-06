@@ -236,6 +236,11 @@
         <div class="toolbar">
           <input v-model="runId" placeholder="运行名：英文/数字/._-（可空，自动 计划名_时间）" style="width:300px" title="本次运行的数据目录名：calibration_replay_data/runs/<运行名>/">
           <label class="inline" title="判定手臂静止后，再等这么久才触发拍摄；改动后自动保存">静止后等待 <input type="number" min="0" step=".1" v-model.number="plan.stability.capture_delay_s" @change="savePlan" style="width:70px"> s 再拍</label>
+          <label class="inline" v-if="plan.target==='hand_eye_3D'" title="运行期间经 8132 → 18089 每 0.3s 下发全零位置，让灵巧手回到并停在零位；标记贴在手上，手指姿态一变标记就相对腕系移动。手型取 18000 当前激活的手；18089 被其他控制源占用时运行会在预检阶段拒绝，不会抢占。运行结束/急停自动停止保持。改动后自动保存">
+            <input type="checkbox" v-model="plan.hold_hand_zero" @change="savePlan"> 拍摄期间保持灵巧手零位
+            <span v-if="plan.hold_hand_zero && capability && capability.available && capability.hand_name" class="muted small">（{{ capability.hand_name }}）</span>
+            <span v-else-if="plan.hold_hand_zero && capability && !capability.hand_id" class="bad small">18000 未上报激活手型，运行会被拒绝</span>
+          </label>
         </div>
         <div class="toolbar">
           <button class="primary" @click="act('engage')" :disabled="arm.engaged" :title="'接管' + armName[plan.arm] + '并刚性保持当前姿态（开始发布 rt/arm_sdk）'">接管{{ armName[plan.arm] }}并保持</button>

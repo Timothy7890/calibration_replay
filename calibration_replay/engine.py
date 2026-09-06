@@ -57,12 +57,17 @@ class ReplayEngine:
         run_writer: Callable[[str, dict], Any] | None = None,
         run_dir_factory: Callable[[str], Any] | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        hand_id_provider: Callable[[], str | None] | None = None,
+        hand_hold_settle_s: float = 1.5,
     ):
         self.bridge = bridge
         self.adapter_factory = adapter_factory
         self.run_writer = run_writer
         self.run_dir_factory = run_dir_factory
         self.sleep = sleep
+        # 18000 当前激活的手型 id；plan.hold_hand_zero 时用它让 8132 经 18089 保持零位
+        self.hand_id_provider = hand_id_provider
+        self.hand_hold_settle_s = hand_hold_settle_s
         self._lock = threading.RLock()
         self._pause_condition = threading.Condition(self._lock)
         self._state = "idle"
@@ -219,9 +224,18 @@ class ReplayEngine:
         except Exception as exc:
             self._set_state("fault", f"预检拒绝运行：{exc}")
             raise RuntimeError(f"preflight failed: {exc}") from exc
+        hand_hold = None
+        if plan.hold_hand_zero and callable(getattr(adapter, "begin_hand_hold", None)):
+            try:
+                hand_id = self.hand_id_provider() if self.hand_id_provider else None
+                hand_hold = adapter.begin_hand_hold(hand_id, plan.arm)
+            except Exception as exc:
+                self._set_state("fault", f"预检拒绝运行：灵巧手零位保持失败：{exc}")
+                raise RuntimeError(f"hand hold failed: {exc}") from exc
         self._stop.clear()
         with self._lock:
             self._progress["preflight"] = preflight
+            self._progress["hand_hold"] = hand_hold
         self.bridge.enable_motion()
         self._thread = threading.Thread(
             target=self._run,
@@ -258,14 +272,16 @@ class ReplayEngine:
             self.sleep(max(0.0, next_at - time.monotonic()))
 
     def _sleep_interruptible(self, seconds: float) -> None:
-        deadline = time.monotonic() + seconds
-        while True:
+        # 以 self.sleep 计时（而非墙钟），测试注入的假 sleep 才能让等待瞬间完成
+        slept = 0.0
+        while slept < seconds:
             if self._stop.is_set():
                 raise InterruptedError("run stopped")
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return
-            self.sleep(min(0.05, remaining))
+            step = min(0.05, seconds - slept)
+            self.sleep(step)
+            slept += step
+        if self._stop.is_set():
+            raise InterruptedError("run stopped")
 
     def _pause_if_requested(self, leg: str) -> None:
         with self._pause_condition:
@@ -291,6 +307,11 @@ class ReplayEngine:
             "certificates": [],
         }
         try:
+            run_record["hand_hold"] = self._progress.get("hand_hold")
+            if run_record["hand_hold"] and self.hand_hold_settle_s > 0:
+                # 给手指回零位一点时间，再开始动手臂
+                self._set_state("preflight", "灵巧手正在回零位并保持…")
+                self._sleep_interruptible(self.hand_hold_settle_s)
             route = route_for_plan(plan)
             for index, (node, leg) in enumerate(route):
                 self._set_state(
@@ -372,6 +393,11 @@ class ReplayEngine:
             run_record["error"] = str(exc)
             self._set_state("fault", f"故障：{exc}")
         finally:
+            if run_record.get("hand_hold") and callable(getattr(adapter, "end_hand_hold", None)):
+                try:
+                    adapter.end_hand_hold()
+                except Exception:
+                    pass
             if self.run_writer is not None:
                 self.run_writer(run_id, run_record)
 

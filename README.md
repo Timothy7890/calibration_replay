@@ -15,6 +15,13 @@ files are exports.
 
 ## Left / right arms
 
+* `Plan.hold_hand_zero` (default on, hand_eye_3D only): before the arm moves the
+  engine calls the capture service's `POST /api/mount/hand-hold/start` with the
+  hand active in 18000 and the plan's arm as side; hand_eye_3D then streams
+  all-zero finger positions to 18089 every 0.3 s for the whole run and the engine
+  stops it in `finally` (completed, stopped, fault). Markers are glued to the
+  hand, so finger posture must not change between captures. A refusal (18089
+  busy, no active hand) is a preflight fault, never a takeover.
 * New nodes can be auto-placed: `POST /api/plans/{id}/nodes[/record]` with
   `place: "auto"` inserts into the gap with the least detour
   (`Δ(A,q) + Δ(q,B) − Δ(A,B)`, Δ = max single-joint delta, return leg included);
