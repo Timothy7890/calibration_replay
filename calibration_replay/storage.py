@@ -5,7 +5,7 @@ import os
 import threading
 from pathlib import Path
 
-from .models import Plan
+from .models import ARMS, Plan
 
 DEFAULT_PLANS = (
     ("2D head", "hand_eye_2D_head", "http://127.0.0.1:8131"),
@@ -62,18 +62,26 @@ class PlanStore:
             raise KeyError(plan_id)
         path.unlink()
 
-    def create_run_dir(self, run_id: str) -> Path:
-        """Every run owns ``runs/<run_id>/``: the capture service writes its
-        episodes there and ``run.json`` is written next to them. Refuses to reuse
-        a name so two runs can never mix their episodes."""
-        path = self.run_dir / run_id
+    def run_path(self, run_id: str, arm: str) -> Path:
+        """``runs/<left|right>/<run_id>/`` — the arm is the first layer so left
+        and right data never share a directory."""
+        if arm not in ARMS:
+            raise ValueError(f"arm must be one of {ARMS}, got {arm!r}")
+        return self.run_dir / arm / run_id
+
+    def create_run_dir(self, run_id: str, arm: str) -> Path:
+        """Every run owns its directory: the capture service writes its episodes
+        there and ``run.json`` is written next to them. Refuses to reuse a name
+        (within the same arm) so two runs can never mix their episodes."""
+        path = self.run_path(run_id, arm)
         if path.exists():
             raise FileExistsError(f"run '{run_id}' already exists at {path}")
         path.mkdir(parents=True)
         return path
 
     def write_run(self, run_id: str, payload: dict) -> Path:
-        run_dir = self.run_dir / run_id
+        arm = str((payload.get("plan") or {}).get("arm") or "right")
+        run_dir = self.run_path(run_id, arm)
         run_dir.mkdir(parents=True, exist_ok=True)
         path = run_dir / "run.json"
         path.write_text(
@@ -84,7 +92,7 @@ class PlanStore:
 
     def list_runs(self) -> list[dict]:
         runs: list[dict] = []
-        for path in sorted(self.run_dir.glob("*/run.json")):
+        for path in sorted(self.run_dir.glob("*/*/run.json")):
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
@@ -92,6 +100,7 @@ class PlanStore:
             runs.append(
                 {
                     "run_id": payload.get("run_id", path.parent.name),
+                    "arm": path.parent.parent.name,
                     "plan_name": (payload.get("plan") or {}).get("name"),
                     "outcome": payload.get("outcome"),
                     "started_at": payload.get("started_at"),

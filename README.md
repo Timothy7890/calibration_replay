@@ -15,9 +15,12 @@ files are exports.
 
 ## Left / right arms
 
-* `Plan.arm` selects the arm. Joint names, URDF limits, the 3D preview chain
-  and the capture-service check (`GET /api/status` → `arm` must equal the plan's
-  arm, i.e. start hand_eye_3D with `--arm left|right`) all follow it.
+* `Plan.arm` selects the arm. Joint names, URDF limits, the 3D preview chain and
+  the capture request all follow it: every `POST /api/record/episode` carries
+  `arm`, so a hand_eye_3D backend started for either arm records the plan's arm
+  (both arms live in the same `rt/lowstate` frame). Only an old backend without
+  `recording.arm_selectable` must itself be started with `--arm <plan arm>`;
+  a result whose `arm` differs from the plan aborts the run without retry.
 * `POST /api/plans/{id}/mirror` copies a plan for the other arm. H2's arms share
   joint axes and are mounted mirrored about Y, so pitch/elbow keep their sign and
   roll/yaw flip (`MIRROR_SIGNS = [1,-1,-1,1,-1,1,-1]`); limits are symmetric.
@@ -48,11 +51,11 @@ cd /home/robot/yx/project/calib/calibration_replay
 /home/robot/miniconda3/envs/fastapi/bin/python -m calibration_replay \
   --mock \
   --host 127.0.0.1 \
-  --port 8090 \
+  --port 18004 \
   --data-root /tmp/calibration_replay_data
 ```
 
-Open <http://127.0.0.1:8090>. The frontend is a Vue 3 single page under
+Open <http://127.0.0.1:18004>. The frontend is a Vue 3 single page under
 `calibration_replay/static/` (`index.html`, `app.js`, `app.css`); Vue is vendored
 at `static/vendor/vue.global.prod.js`, so there is no CDN dependency and no
 build step. The page is organised as five numbered steps: nodes → engage &
@@ -80,7 +83,7 @@ cd /home/robot/yx/project/calib/calibration_replay
   --network-interface enp86s0 \
   --hand-eye-3d-project /home/robot/yx/project/calib/hand_eye_3D \
   --host 127.0.0.1 \
-  --port 8090 \
+  --port 18004 \
   --data-root /home/robot/yx/project/calib/calibration_replay_data \
   --base-url-2d http://127.0.0.1:8131 \
   --base-url-3d http://127.0.0.1:8132
@@ -193,14 +196,15 @@ State machine values are `idle`, `preflight`, `armed`, `moving`, `settling`,
 `capturing`, `paused`, `returning`, `completed`, `fault`, and `stopped`.
 `POST /api/control/run/{plan_id}` accepts `{"run_id": "optional-safe-label"}`;
 omitting it generates `<plan-slug>_<YYYYmmdd-HHMMSS>`. Every run owns
-`<data-root>/runs/<run_id>/` (a name that already exists is refused): for
+`<data-root>/runs/<left|right>/<run_id>/` (the arm is the first layer; a name
+that already exists for that arm is refused): for
 `hand_eye_3D` the engine passes that directory as `record_dir` to
 `POST /api/record/episode`, so the 8132 capture service writes
 `episode_0000…` there instead of its default `--record-task-dir`, and
 `run.json` (plan snapshot, certificates, capture results) is written beside
 them when the run ends. `GET /api/runs` lists the runs. 2D captures stay in the
 8131 session directory. Point the hand_eye_3D solver at a run directory with
-`--teleop-task-dir <data-root>/runs/<run_id>` (or import it from the 7012 page).
+`--teleop-task-dir <data-root>/runs/<arm>/<run_id>` (or import it from the 7012 page).
 The local operator UI is Chinese and exposes both the run name and the per-plan
 2D camera serial.
 

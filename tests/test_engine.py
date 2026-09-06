@@ -127,11 +127,12 @@ def test_run_owns_a_directory_and_captures_record_into_it(tmp_path):
     engine.engage()
     run_id = engine.start(make_plan(), "trial-a")
     assert engine.wait(10)
-    run_dir = tmp_path / "runs" / "trial-a"
+    run_dir = tmp_path / "runs" / "right" / "trial-a"
     assert engine.status()["run_dir"] == str(run_dir)
     assert (run_dir / "run.json").is_file()
     assert adapter.calls[0]["record_dir"] == str(run_dir)
     assert store.list_runs()[0]["run_id"] == run_id
+    assert store.list_runs()[0]["arm"] == "right"
     with pytest.raises(ValueError, match="already used"):
         engine.start(make_plan(), "trial-a")
 

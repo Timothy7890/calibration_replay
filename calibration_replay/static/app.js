@@ -29,6 +29,7 @@ function zh(msg) {
     .replace(/adjacent nodes (\S+)->(\S+) delta ([\d.]+) exceeds ([\d.]+)/g, "相邻节点 $1 → $2 差值 $3 rad 超过 $4，中间要补过渡点")
     .replace(/return leg (\S+)->home (\S+) delta ([\d.]+) exceeds ([\d.]+); append transit nodes after the last node/g, "回程过渡不足：末点 $1 → 原点 差值 $3 rad 超过 $4，点「自动补过渡点」在末尾生成回程过渡帧")
     .replace(/capture service ignored record_dir and wrote to (\S+); restart the hand_eye_3D backend \(8132\).*/g, "8132 采集端是旧版本，忽略了运行目录并把数据写到了 $1；请重启 hand_eye_3D 后端（./start.sh）后重跑")
+    .replace(/capture service recorded the (left|right) arm instead of (left|right); restart the hand_eye_3D backend \(8132\) with --arm (left|right)/g, (m, a, b, c) => `8132 采集端是旧版本，记录的是${armName[a]}而不是${armName[b]}；请用 --arm ${c} 重启采集端`)
     .replace(/run name already used: .*?already exists at (\S+)/g, "运行名已被用过（$1），换一个名字")
     .replace(/run_id must be 1-128 safe characters.*/g, "运行名只能用英文字母、数字、. _ -（1～128 个字符）")
     .replace(/node (\S+) joint (\d+)=([-\d.]+) outside \[([-\d.]+), ([-\d.]+)\]/g, "节点 $1 第 $2 关节 $3 超出限位 [$4, $5]")
@@ -73,7 +74,7 @@ createApp({
 
     const newName = ref("");
     const newTarget = ref("hand_eye_3D");
-    const import3dDir = ref("/home/robot/yx/project/calib/hand_eye_3D/teleop_data/biaoding");
+    const import3dDir = ref("/home/robot/yx/project/calib/hand_eye_3D/teleop_data/biaoding/right");
     const import3dResult = ref("");
     const nodeName = ref("");
     const manualQ = ref("");

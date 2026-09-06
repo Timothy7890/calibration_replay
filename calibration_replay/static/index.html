@@ -17,7 +17,7 @@
     </div>
     <div class="status-block" :class="'st-' + status.state">
       <div class="state">{{ stateName[status.state] || status.state }}</div>
-      <div class="msg">{{ status.message || (online ? '' : '无法连接 8090 服务') }}</div>
+      <div class="msg">{{ status.message || (online ? '' : '无法连接 18004 服务') }}</div>
     </div>
     <div class="arm-block">
       <span class="pill" :class="arm.engaged ? 'on' : ''">{{ arm.engaged ? (armName[arm.arm] || '') + '已接管' : '未接管' }}</span>
@@ -237,7 +237,7 @@
           <button class="danger right" @click="act('disarm')" :disabled="!arm.engaged || running" title="停止发布 rt/arm_sdk，手臂交还机器人本体控制；操作前先扶住手臂">解除接管（先扶住手臂）</button>
         </div>
         <p class="muted small">急停 = 冻结在当前位置并刚性保持，随后可用「拖动模式」把手臂挪到安全位置再「解除接管」。顶栏的「■ 急停」在任何滚动位置都可点。</p>
-        <p v-if="status.run_dir" class="small mono">数据目录：{{ status.run_dir }}<span class="muted">（episode_0000… + run.json）</span></p>
+        <p v-if="status.run_dir" class="small mono">数据目录：{{ status.run_dir }}<span class="muted">（runs/左或右/运行名：episode_0000… + run.json）</span></p>
         <div v-if="status.progress && status.progress.route_count" class="progress">
           <div class="bar"><div class="fill" :style="{width: (100*(status.progress.route_index+1)/status.progress.route_count)+'%'}"></div></div>
           <div class="small">{{ status.progress.route_index+1 }} / {{ status.progress.route_count }} · {{ status.progress.leg==='reverse' ? '返回' : '前向' }} · {{ status.progress.node_name }}</div>

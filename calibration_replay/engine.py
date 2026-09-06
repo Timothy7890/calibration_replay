@@ -204,7 +204,7 @@ class ReplayEngine:
             run_dir: str | None = None
             if self.run_dir_factory is not None:
                 try:
-                    run_dir = str(self.run_dir_factory(run_id))
+                    run_dir = str(self.run_dir_factory(run_id, plan.arm))
                 except FileExistsError as exc:
                     raise ValueError(f"run name already used: {exc}") from exc
             self._run_id = run_id

@@ -116,6 +116,7 @@ def test_3d_exact_record_path_and_body():
                 "target_q_rad": [0.2] * 7,
                 "stability": {"stable": True, "sample_count": 30},
                 "frame_count": 7,
+                "arm": "right",
             },
         )
     ]
@@ -143,3 +144,30 @@ def test_3d_capture_passes_record_dir_and_rejects_misplaced_episodes():
             stability={"stable": True}, record_dir="/data/runs/r1",
         )
     assert len(legacy.requests) == 1  # 不重试，避免继续往错误目录写
+
+
+
+def test_preflight_arm_rule_depends_on_capture_service_capability():
+    """新版 8132 可按请求选臂 → 服务 --arm 不必等于计划臂；旧版必须一致。"""
+    base = {"/api/arm/status": {"armed": False}}
+    new_service = FakeHttpAdapter(
+        {**base, "/api/status": {"arm": "right", "recording": {"arm_selectable": True}}},
+        target="hand_eye_3D", arm="left",
+    )
+    assert new_service.preflight("r")["ok"]
+    old_service = FakeHttpAdapter(
+        {**base, "/api/status": {"arm": "right", "recording": {}}},
+        target="hand_eye_3D", arm="left",
+    )
+    with pytest.raises(RuntimeError, match="restart it with --arm left"):
+        old_service.preflight("r")
+
+    # 录制结果里的 arm 与计划不一致 → 不重试直接失败
+    wrong = FakeHttpAdapter(
+        {"/api/record/episode": {"ok": True, "episode": "episode_0000", "arm": "right", "path": "/d/r/episode_0000"}},
+        target="hand_eye_3D", arm="left",
+    )
+    with pytest.raises(RuntimeError, match="recorded the right arm instead of left"):
+        wrong.capture(capture_id="c", run_id="r", waypoint_id="w", target_q_rad=[0.0] * 7,
+                      stability={"stable": True}, record_dir="/d/r")
+    assert len(wrong.requests) == 1

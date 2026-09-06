@@ -20,7 +20,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to the existing hand_eye_3D project",
     )
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8090)
+    parser.add_argument("--port", type=int, default=18004)
     parser.add_argument(
         "--data-root",
         default=str(Path.cwd() / "replay_data"),

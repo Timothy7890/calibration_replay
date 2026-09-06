@@ -44,6 +44,7 @@ class HttpCaptureAdapter(CaptureAdapter):
         self.base_url = base_url.rstrip("/")
         self.target = target
         self.arm = arm
+        self.arm_selectable = False
         self.require_corners = require_corners
         self.camera_serial = camera_serial.strip() if camera_serial else None
         self.frame_count = int(frame_count)
@@ -93,7 +94,11 @@ class HttpCaptureAdapter(CaptureAdapter):
                 "capture target exposes active/enabled arm control; restart it without --arm-control"
             )
         active_arm = health.get("arm")
-        if active_arm is not None and active_arm != self.arm:
+        recording = health.get("recording") or {}
+        # 新版 8132 可按请求记录任一条臂（同一帧 lowstate 的另一组电机）；
+        # 旧版只记 --arm 那条臂，此时必须与计划一致，否则关节数据是另一条臂的。
+        self.arm_selectable = bool(recording.get("arm_selectable"))
+        if active_arm is not None and active_arm != self.arm and not self.arm_selectable:
             raise RuntimeError(
                 f"capture service is recording the {active_arm} arm but this plan is for the "
                 f"{self.arm} arm; restart it with --arm {self.arm}"
@@ -182,6 +187,7 @@ class HttpCaptureAdapter(CaptureAdapter):
         if self.target == "hand_eye_3D":
             path = "/api/record/episode"
             body["frame_count"] = self.frame_count
+            body["arm"] = self.arm
             if record_dir:
                 # 8132 与本服务同机：episode 直接落到本次运行的目录
                 body["record_dir"] = record_dir
@@ -201,6 +207,11 @@ class HttpCaptureAdapter(CaptureAdapter):
                     and result.get("corners_detected") is False
                 ):
                     raise RuntimeError("capture rejected: chessboard corners not detected")
+                if self.target == "hand_eye_3D" and result.get("arm") not in (None, self.arm):
+                    raise NonRetryableCaptureError(
+                        f"capture service recorded the {result.get('arm')} arm instead of "
+                        f"{self.arm}; restart the hand_eye_3D backend (8132) with --arm {self.arm}"
+                    )
                 if record_dir and self.target == "hand_eye_3D":
                     path = str(result.get("path") or "")
                     if not path.startswith(record_dir.rstrip("/") + "/"):

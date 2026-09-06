@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 8090 标定轨迹回放服务启动器（H2 右臂，人工监护）。
+# 18004 标定轨迹回放服务启动器（左右臂由计划选择，人工监护）。
 #
 # 启动：./replay.sh            （等价 ./replay.sh start）
 # 状态：./replay.sh status
@@ -16,7 +16,7 @@ set -o pipefail
 cd "$(dirname "$0")"
 
 PYTHON=${PYTHON:-/home/robot/miniconda3/envs/fastapi/bin/python}
-PORT=${PORT:-8090}
+PORT=${PORT:-18004}
 HOST=${HOST:-0.0.0.0}   # 0.0.0.0 允许局域网访问；只想本机访问改 127.0.0.1
 NETWORK_INTERFACE=${NETWORK_INTERFACE:-enp86s0}
 DATA_ROOT=${DATA_ROOT:-/home/robot/yx/project/calib/calibration_replay_data}
