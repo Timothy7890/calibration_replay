@@ -15,6 +15,12 @@ files are exports.
 
 ## Left / right arms
 
+* New nodes can be auto-placed: `POST /api/plans/{id}/nodes[/record]` with
+  `place: "auto"` inserts into the gap with the least detour
+  (`Δ(A,q) + Δ(q,B) − Δ(A,B)`, Δ = max single-joint delta, return leg included);
+  `POST /api/plans/{id}/nodes/{node_id}/autoplace` re-places an existing node.
+  Home always stays first. The UI checkbox “自动放到最合适位置” (default on) and
+  the per-row ⇅ button use these.
 * `Plan.arm` selects the arm. Joint names, URDF limits, the 3D preview chain and
   the capture request all follow it: every `POST /api/record/episode` carries
   `arm`, so a hand_eye_3D backend started for either arm records the plan's arm

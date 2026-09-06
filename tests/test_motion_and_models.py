@@ -103,3 +103,35 @@ def test_mirror_plan_flips_roll_and_yaw_and_swaps_arm():
     assert mirror_q(mirror_q([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])) == [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
     back = mirror_plan(mirrored)
     assert back.arm == "right" and back.nodes[1].q_rad == pytest.approx(plan.nodes[1].q_rad)
+
+
+def test_best_insert_index_picks_smallest_detour():
+    from calibration_replay.models import Plan, PlanNode, best_insert_index
+
+    def node(name, x, role="sample", enabled=True):
+        return PlanNode.create(name, role, [x, 0, 0, 0, 0, 0, 0], enabled=enabled)
+
+    plan = Plan.create("p", "hand_eye_3D", "http://x")
+    plan.nodes = [node("home", 0.0, role="home"), node("a", 1.0), node("b", 2.0), node("c", 3.0)]
+
+    # 1.5 belongs between a(1) and b(2) → index 2
+    assert best_insert_index(plan, [1.5, 0, 0, 0, 0, 0, 0]) == 2
+    # 0.5 belongs between home and a → index 1
+    assert best_insert_index(plan, [0.5, 0, 0, 0, 0, 0, 0]) == 1
+    # 4.0: gaps b→c and c→home tie on detour (2.0); tie-break picks the one whose
+    # longer new segment is shorter → before c (segments 2,1) rather than the end (1,4)
+    assert best_insert_index(plan, [4.0, 0, 0, 0, 0, 0, 0]) == 3
+    # a point past the last node on another joint sits between b and c or on the return
+    # leg with equal detour (0.4); again the shorter longest-segment wins → before c
+    assert best_insert_index(plan, [3.0, 0.4, 0, 0, 0, 0, 0]) == 3
+    # disabled node is not a gap endpoint but keeps its place
+    plan.nodes.insert(2, node("off", 1.5, enabled=False))
+    # gaps now: home→a, a→b (spanning the disabled row), b→c, c→home; 1.7 goes before b → index 3
+    assert best_insert_index(plan, [1.7, 0, 0, 0, 0, 0, 0]) == 3
+    # re-placing an existing node ignores itself
+    plan.nodes = [node("home", 0.0, role="home"), node("a", 1.0), node("b", 2.0), node("late", 1.5)]
+    late = plan.nodes[-1]
+    assert best_insert_index(plan, late.q_rad, exclude_id=late.id) == 2
+    # no home → append
+    plan.nodes = [node("a", 1.0), node("b", 2.0)]
+    assert best_insert_index(plan, [1.5, 0, 0, 0, 0, 0, 0]) == 2

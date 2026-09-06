@@ -257,6 +257,42 @@ def validate_plan(
     return errors
 
 
+def max_joint_delta(a: list[float], b: list[float]) -> float:
+    return max(abs(x - y) for x, y in zip(a, b))
+
+
+def best_insert_index(plan: Plan, q: list[float], *, exclude_id: str | None = None) -> int:
+    """Index in ``plan.nodes`` where a node at ``q`` adds the least detour.
+
+    Candidate gaps are every pair of consecutive enabled nodes on the route
+    (home → ... → last) plus the return leg (last → home). Detour cost of a gap
+    (A, B) is ``Δ(A,q) + Δ(q,B) − Δ(A,B)`` with Δ the max single-joint delta, the
+    same measure the adjacency check uses. Disabled nodes are skipped as gap
+    endpoints but keep their place; the node ``exclude_id`` (when re-placing an
+    existing node) is ignored entirely. Without an enabled home the node goes
+    to the end. Returns the position to ``insert`` at in the list *without*
+    the excluded node."""
+    nodes = [n for n in plan.nodes if n.id != exclude_id]
+    home_idx = next((i for i, n in enumerate(nodes) if n.enabled and n.role == "home"), None)
+    if home_idx is None:
+        return len(nodes)
+    # route positions: indices into ``nodes`` of home then each enabled non-home node
+    route = [home_idx] + [i for i, n in enumerate(nodes) if n.enabled and n.role != "home" and i > home_idx]
+    best_pos, best_key = len(nodes), (float("inf"), float("inf"))
+    for k in range(len(route)):
+        a = nodes[route[k]]
+        b = nodes[route[k + 1]] if k + 1 < len(route) else nodes[home_idx]   # return leg
+        da, db = max_joint_delta(a.q_rad, q), max_joint_delta(q, b.q_rad)
+        detour = da + db - max_joint_delta(a.q_rad, b.q_rad)
+        # tie-break: prefer the gap whose longer new segment is shorter (fewer transits needed)
+        key = (round(detour, 9), round(max(da, db), 9))
+        # insert just before B (return leg: at the end)
+        pos = route[k + 1] if k + 1 < len(route) else len(nodes)
+        if key < best_key:
+            best_pos, best_key = pos, key
+    return best_pos
+
+
 def route_for_plan(plan: Plan) -> list[tuple[PlanNode, str]]:
     """home → every enabled node in table order → straight back to home.
 

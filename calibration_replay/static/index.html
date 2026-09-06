@@ -112,6 +112,9 @@
           <input v-model="manualQ" placeholder="手工 7 个弧度，逗号分隔" class="mono" style="width:300px">
           <select v-model="manualRole"><option value="transit">过渡</option><option value="sample">采样</option></select>
           <button @click="manualNode">添加手工姿态</button>
+          <label class="inline" style="margin:0" title="按最大单关节差计算：插到 Δ(前,新)+Δ(新,后)−Δ(前,后) 最小的缝隙（含末点→原点的回程缝）；不勾则追加到末尾">
+            <input type="checkbox" v-model="autoPlace"> 自动放到最合适位置
+          </label>
         </div>
         <table class="nodes">
           <thead><tr><th>#</th><th>启用</th><th>角色</th><th>名称</th><th title="与上一启用节点的最大单关节差">Δ上一点</th><th>关节角 rad</th><th></th></tr></thead>
@@ -130,6 +133,7 @@
               <td class="ops">
                 <button class="sm" @click="moveNode(i,-1)" :disabled="i===0">↑</button>
                 <button class="sm" @click="moveNode(i,1)" :disabled="i===plan.nodes.length-1">↓</button>
+                <button class="sm" @click="autoplaceNode(n.id)" :disabled="n.role==='home'" title="挪到绕路最小的位置">⇅</button>
                 <button class="sm danger" @click="removeNode(n.id)">×</button>
               </td>
             </tr>

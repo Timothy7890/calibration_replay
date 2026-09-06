@@ -77,6 +77,7 @@ createApp({
     const import3dDir = ref("/home/robot/yx/project/calib/hand_eye_3D/teleop_data/biaoding/right");
     const import3dResult = ref("");
     const nodeName = ref("");
+    const autoPlace = ref(true);   // 录制/添加的新节点自动放到绕路最小的位置
     const manualQ = ref("");
     const manualRole = ref("transit");
     const exportDir = ref("/home/robot/yx/project/IK_replay");
@@ -233,15 +234,22 @@ createApp({
     });
     const recordNode = (role) => guard(async () => {
       const label = { home: "原点", transit: "过渡点", sample: "采样点" }[role];
-      await post(`/api/plans/${plan.value.id}/nodes/record`, { role, name: nodeName.value || label });
+      const place = autoPlace.value && role !== "home" ? "auto" : "append";
+      const node = await post(`/api/plans/${plan.value.id}/nodes/record`, { role, name: nodeName.value || label, place });
       nodeName.value = "";
       await reload();
-      say(`已把当前姿态录为${label}`);
+      const idx = plan.value.nodes.findIndex((n) => n.id === node.id);
+      say(place === "auto" ? `已把当前姿态录为${label}，自动放到第 ${idx + 1} 行` : `已把当前姿态录为${label}`);
+    });
+    const autoplaceNode = (id) => guard(async () => {
+      plan.value = await post(`/api/plans/${plan.value.id}/nodes/${id}/autoplace`, {});
+      const idx = plan.value.nodes.findIndex((n) => n.id === id);
+      say(`已挪到第 ${idx + 1} 行（绕路最小的位置）`);
     });
     const manualNode = () => guard(async () => {
       const q = parseQ(manualQ.value);
       if (q.length !== 7 || q.some((x) => !Number.isFinite(x))) throw new Error("需要 7 个有限数值");
-      await post(`/api/plans/${plan.value.id}/nodes`, { role: manualRole.value, name: nodeName.value || "手工姿态", q_rad: q });
+      await post(`/api/plans/${plan.value.id}/nodes`, { role: manualRole.value, name: nodeName.value || "手工姿态", q_rad: q, place: autoPlace.value ? "auto" : "append" });
       manualQ.value = ""; nodeName.value = "";
       await reload();
     });
@@ -380,7 +388,7 @@ createApp({
       arm, running, home, homeDelta, deltas, gaps, steps, logText,
       fmt, fmtQ, parseQ, shortJoint, summarize,
       loadPlans, loadPlan, savePlan, createPlan, deletePlan, import3D, importDefaults,
-      nodeEdit, moveNode, removeNode, recordNode, manualNode, autoInsertTransits, returnDelta,
+      nodeEdit, moveNode, removeNode, recordNode, manualNode, autoInsertTransits, returnDelta, autoPlace, autoplaceNode,
       validatePlan, exportPlan, act, run,
       viewerEl, preview, previewLoading, previewError, previewFrame, previewPlaying, previewSpeed,
       currentStop, currentStopIndex, loadPreview, togglePlay, scrub,

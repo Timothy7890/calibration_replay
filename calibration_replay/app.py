@@ -17,7 +17,9 @@ from .importer import import_3d_task, import_session, seed_default_imports
 import json
 import urllib.request
 
-from .models import ARM_LABELS, ARMS, Plan, PlanNode, mirror_plan, validate_plan, validate_q
+from .models import (
+    ARM_LABELS, ARMS, Plan, PlanNode, best_insert_index, mirror_plan, validate_plan, validate_q,
+)
 from .storage import PlanStore
 
 
@@ -296,10 +298,27 @@ def create_app(
         if role == "home":
             plan.nodes = [item for item in plan.nodes if item.role != "home"]
             plan.nodes.insert(0, node)
+        elif body.get("place") == "auto":
+            # 自适应：插到绕路最小的缝隙（含回程缝），而不是追加到末尾
+            plan.nodes.insert(best_insert_index(plan, q), node)
         else:
             plan.nodes.append(node)
         checked_save(plan)
         return node.__dict__
+
+    @app.post("/api/plans/{plan_id}/nodes/{node_id}/autoplace")
+    def autoplace_node(plan_id: str, node_id: str):
+        """把已有节点挪到绕路最小的位置（原点固定在首位，不参与）。"""
+        plan = load(plan_id)
+        node = next((item for item in plan.nodes if item.id == node_id), None)
+        if node is None:
+            raise HTTPException(404, "node not found")
+        if node.role == "home":
+            raise HTTPException(422, "home stays first; it cannot be auto-placed")
+        index = best_insert_index(plan, node.q_rad, exclude_id=node.id)
+        plan.nodes = [item for item in plan.nodes if item.id != node.id]
+        plan.nodes.insert(index, node)
+        return checked_save(plan).to_dict()
 
     @app.post("/api/plans/{plan_id}/nodes/record")
     def record_node(plan_id: str, body: dict):
