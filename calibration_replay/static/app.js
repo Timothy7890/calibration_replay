@@ -147,7 +147,11 @@ createApp({
 
     const fmt = (v) => (Number.isFinite(v) ? Number(v).toFixed(4) : "—");
     const fmtQ = (q) => q.map((x) => Number(x).toFixed(4)).join(", ");
-    const parseQ = (s) => s.split(/[,\s]+/).filter(Boolean).map(Number);
+    // 分隔符兼容中文全角逗号/分号/空格；deg 后缀或 "°" 表示按角度输入
+    const parseQ = (s) => String(s).replace(/[，；;、]/g, ",").split(/[,\s]+/).filter(Boolean).map((tok) => {
+      const m = tok.match(/^(-?[\d.]+)(deg|°)$/i);
+      return m ? Number(m[1]) * Math.PI / 180 : Number(tok);
+    });
     const shortJoint = (n) => n.replace(/^right_/, "").replace(/_joint$/, "");
     const summarize = (r) => {
       if (!r) return "";
@@ -276,7 +280,7 @@ createApp({
     });
     const manualNode = () => guard(async () => {
       const q = parseQ(manualQ.value);
-      if (q.length !== 7 || q.some((x) => !Number.isFinite(x))) throw new Error("需要 7 个有限数值");
+      if (q.length !== 7 || q.some((x) => !Number.isFinite(x))) throw new Error(`需要 7 个数值（弧度），当前解析到 ${q.filter(Number.isFinite).length} 个。用英文或中文逗号分隔均可，如 0,0,0,0,0,0,0`);
       await post(`/api/plans/${plan.value.id}/nodes`, { role: manualRole.value, name: nodeName.value || "手工姿态", q_rad: q, place: autoPlace.value ? "auto" : "append" });
       manualQ.value = ""; nodeName.value = "";
       await reload();

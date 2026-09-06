@@ -109,7 +109,7 @@
           <input v-model="nodeName" placeholder="名称（可空）" style="width:160px">
           <button @click="recordNode('sample')" :disabled="!online">记录当前姿态为采样点</button>
           <button @click="recordNode('transit')" :disabled="!online">记录当前姿态为过渡点</button>
-          <input v-model="manualQ" placeholder="手工 7 个弧度，逗号分隔" class="mono" style="width:300px">
+          <input v-model="manualQ" placeholder="7 个关节角（弧度，逗号分隔；可写 30deg）" class="mono" style="width:300px">
           <select v-model="manualRole"><option value="transit">过渡</option><option value="sample">采样</option></select>
           <button @click="manualNode">添加手工姿态</button>
           <label class="inline" style="margin:0" title="按最大单关节差计算：插到 Δ(前,新)+Δ(新,后)−Δ(前,后) 最小的缝隙（含末点→原点的回程缝）；不勾则追加到末尾">
