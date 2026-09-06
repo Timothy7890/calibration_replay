@@ -144,14 +144,16 @@
 
       <!-- ---------- 2 接管 & 原点 ---------- -->
       <section class="card" id="s2">
-        <h2><span class="num">2</span> 接管手臂并录制原点</h2>
-        <p class="muted small">接管的是本计划的 <b>{{ armName[plan.arm] }}</b>，接管后才会发布 rt/arm_sdk。流程：<b>接管</b>（刚性保持）→ <b>拖动</b>（可用手拖臂）→ 摆到起点 → <b>抓住保持</b> → <b>录为原点</b>。全程有人扶臂。</p>
+        <h2><span class="num">2</span> 接管手臂并录制姿态</h2>
+        <p class="muted small">接管的是本计划的 <b>{{ armName[plan.arm] }}</b>，接管后才会发布 rt/arm_sdk。流程：<b>接管</b>（刚性保持）→ <b>拖动</b>（可用手拖臂）→ 摆到位 → <b>抓住保持</b> → <b>录为原点 / 采样点 / 过渡点</b>。采样点、过渡点按第 1 区的「自动放到最合适位置」勾选决定插入位置（当前：<b>{{ autoPlace ? '自动放置' : '追加到末尾' }}</b>）。全程有人扶臂。</p>
         <p class="hint" v-if="arm.engaged && arm.arm && arm.arm !== plan.arm">当前接管的是 <b>{{ armName[arm.arm] }}</b>，而这个计划是 <b>{{ armName[plan.arm] }}</b>：先「解除接管」，再重新接管。</p>
         <div class="toolbar">
           <button class="primary" @click="act('engage')" :disabled="arm.engaged">接管{{ armName[plan.arm] }}并保持</button>
           <button @click="act('guide')" :disabled="!arm.engaged || arm.guide">拖动模式</button>
           <button @click="act('catch')" :disabled="!arm.engaged || !arm.guide">抓住当前位置并保持</button>
           <button class="primary" @click="recordNode('home')" :disabled="!online">把当前姿态录为原点</button>
+          <button class="primary" @click="recordNode('sample')" :disabled="!online" :title="autoPlace ? '自动放到绕路最小的位置' : '追加到节点表末尾'">录为采样点</button>
+          <button @click="recordNode('transit')" :disabled="!online" :title="autoPlace ? '自动放到绕路最小的位置' : '追加到节点表末尾'">录为过渡点</button>
           <button class="danger" @click="act('disarm')" :disabled="!arm.engaged || running">解除接管（先扶住手臂）</button>
           <button class="danger" @click="act('stop')" title="急停：冻结在当前位置并刚性保持">■ 急停</button>
         </div>
