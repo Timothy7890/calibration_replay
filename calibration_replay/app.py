@@ -223,6 +223,11 @@ def create_app(
             "dq": sample.get("dq"),
             "timestamp": sample.get("timestamp"),
             "source": bridge.source,
+            # 编码器实测 vs 控制目标：/test 读数页用来看"按压时读数是否变化"
+            "desired_rad": sample.get("desired_rad"),
+            "cmd_rad": sample.get("cmd_rad"),
+            "tau_est_nm": sample.get("tau_est_nm"),
+            "engaged": bool(sample.get("engaged", False)),
         }
 
     @app.get("/api/plans")
@@ -536,5 +541,10 @@ def create_app(
     @app.get("/")
     def index():
         return FileResponse(static_dir / "index.html")
+
+    @app.get("/test")
+    def joint_readout():
+        """大屏关节读数：编码器实测 / 目标 / 力矩，带基准差值，用于按压、迟滞等物理测试。"""
+        return FileResponse(static_dir / "test.html")
 
     return app

@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>关节读数大屏 · 18004/test</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #070b12; color: #e6edf7; font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; }
+  header { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; padding: 12px 18px; border-bottom: 1px solid #1f2a3d; background: #0b1220; position: sticky; top: 0; z-index: 2; }
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  header small { color: #8494ab; }
+  .seg { display: inline-flex; border: 1px solid #2a3a55; border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; background: #0f1828; color: #c9d4e5; padding: 8px 16px; cursor: pointer; font: inherit; }
+  .seg button.active { background: #2b6be0; color: #fff; }
+  button.act { border: 1px solid #2a3a55; border-radius: 8px; background: #121c2e; color: #e6edf7; padding: 8px 14px; cursor: pointer; font: inherit; }
+  button.act.primary { background: #2b6be0; border-color: #2b6be0; color: #fff; }
+  button.act.danger { border-color: #7b2a34; color: #ff9aa6; }
+  button.act:disabled { opacity: .45; cursor: not-allowed; }
+  .pill { padding: 4px 10px; border-radius: 999px; border: 1px solid #2a3a55; color: #b7c4d9; font-size: 12px; }
+  .pill.on { border-color: #1f8a5b; color: #7fe0b0; }
+  .pill.off { border-color: #7b2a34; color: #ff9aa6; }
+  main { padding: 14px 18px 40px; display: grid; gap: 14px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 8px 10px; text-align: right; border-bottom: 1px solid #16213a; white-space: nowrap; }
+  th { color: #8494ab; font-weight: 500; font-size: 13px; }
+  td.name, th.name { text-align: left; color: #b7c4d9; }
+  td.big { font-size: 40px; font-weight: 600; line-height: 1; }
+  td.delta { font-size: 34px; font-weight: 600; }
+  td.small { font-size: 16px; color: #b7c4d9; }
+  .pos { color: #7fe0b0; } .neg { color: #ff9aa6; } .zero { color: #6c7a90; }
+  .warn { color: #ffcf5c; } .bad { color: #ff6b7a; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+  .card { border: 1px solid #1f2a3d; border-radius: 10px; padding: 10px 12px; background: #0b1220; }
+  .card span { display: block; color: #8494ab; font-size: 12px; margin-bottom: 4px; }
+  .card b { font-size: 26px; font-weight: 600; }
+  .hint { color: #8494ab; font-size: 13px; line-height: 1.6; }
+  .snap th, .snap td { font-size: 13px; padding: 5px 8px; }
+  .snap td.big { font-size: 14px; font-weight: 500; }
+  code { color: #9fc1ff; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>关节读数大屏 <small>编码器实测 · 与基准的差值 · 力矩</small></h1>
+    <div class="seg">
+      <button :class="{active: arm==='left'}" @click="setArm('left')">左臂</button>
+      <button :class="{active: arm==='right'}" @click="setArm('right')">右臂</button>
+    </div>
+    <span class="pill" :class="engaged ? 'on' : 'off'">{{ engaged ? '已接管（有目标/力矩）' : '未接管（只读编码器）' }}</span>
+    <span class="pill">{{ hz.toFixed(0) }} Hz · {{ source || '—' }}</span>
+    <button class="act primary" @click="setBaseline">把当前读数设为基准</button>
+    <button class="act" :disabled="!baseline" @click="resetPeak">清零峰值</button>
+    <button class="act" :disabled="!baseline" @click="baseline=null; resetPeak()">清除基准</button>
+    <button class="act" @click="snapshot">记一笔快照</button>
+    <button class="act danger" :disabled="!snapshots.length" @click="snapshots=[]">清空快照</button>
+    <span class="pill" v-if="err" style="border-color:#7b2a34;color:#ff9aa6">{{ err }}</span>
+  </header>
+
+  <main>
+    <div class="cards">
+      <div class="card"><span>与基准的最大关节偏差（当前）</span>
+        <b :class="cls(maxAbsDelta, 0.1, 0.3)">{{ baseline ? fmt(maxAbsDelta, 2) + '°' : '—' }}</b></div>
+      <div class="card"><span>与基准的最大关节偏差（峰值）</span>
+        <b :class="cls(peakAbsDelta, 0.1, 0.3)">{{ baseline ? fmt(peakAbsDelta, 2) + '°' : '—' }}</b></div>
+      <div class="card"><span>实测 vs 控制目标 最大差（接管时）</span>
+        <b :class="cls(maxAbsTrack, 0.2, 0.5)">{{ engaged && desired ? fmt(maxAbsTrack, 2) + '°' : '—' }}</b></div>
+      <div class="card"><span>0.5 m 杠杆下 1° ≈ 8.7 mm</span>
+        <b :class="cls(maxAbsDelta, 0.1, 0.3)">{{ baseline ? fmt(maxAbsDelta * 8.7, 1) + ' mm' : '—' }}</b></div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th class="name">关节</th>
+          <th>实测 q (°)</th>
+          <th>Δ基准 (°)</th>
+          <th>Δ峰值 (°)</th>
+          <th>目标 desired (°)</th>
+          <th>实测−目标 (°)</th>
+          <th>力矩 τ (N·m)</th>
+          <th>速度 (°/s)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="(name, i) in names" :key="name">
+          <td class="name">{{ i + 1 }}. {{ name }}</td>
+          <td class="big">{{ fmt(deg(q[i]), 2) }}</td>
+          <td class="delta" :class="baseline ? sign(deg(q[i]) - deg(baseline[i])) : 'zero'">
+            {{ baseline ? fmtSigned(deg(q[i]) - deg(baseline[i]), 2) : '—' }}</td>
+          <td class="small" :class="cls(peak[i] || 0, 0.1, 0.3)">{{ baseline ? fmt(peak[i] || 0, 2) : '—' }}</td>
+          <td class="small">{{ desired ? fmt(deg(desired[i]), 2) : '—' }}</td>
+          <td class="small" :class="desired ? sign(deg(q[i]) - deg(desired[i])) : ''">
+            {{ desired ? fmtSigned(deg(q[i]) - deg(desired[i]), 2) : '—' }}</td>
+          <td class="small">{{ tau ? fmtSigned(tau[i], 2) : '—' }}</td>
+          <td class="small">{{ dq ? fmtSigned(deg(dq[i]), 1) : '—' }}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p class="hint">
+      用法：在 18004 主页拖到位并「接管并保持」→ 这里点「设为基准」→ 用手按压 / 推动手部，看 Δ基准 与 τ 是否变化，松手看是否回到 0。
+      Δ基准 变了 = 编码器感知到了运动；τ 变了但 Δ 不变 = 编码器之后的环节（减速器 / 法兰 / 手）在变形，编码器看不到。
+      「记一笔快照」可把每个时刻的读数存下来对比（按压前 / 按压中 / 松手后；或同一目标从上方到达 / 从下方到达）。
+      快照之间 Δ 最大值超过 0.1° 就值得注意。
+    </p>
+
+    <table class="snap" v-if="snapshots.length">
+      <thead>
+        <tr>
+          <th class="name">#</th><th class="name">时间</th><th class="name">备注</th>
+          <th v-for="(name, i) in names" :key="name">q{{ i + 1 }} (°)</th>
+          <th>max|Δ vs #1| (°)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="(s, k) in snapshots" :key="s.t">
+          <td class="name">{{ k + 1 }}</td>
+          <td class="name">{{ s.time }}</td>
+          <td class="name"><input v-model="s.note" placeholder="按压前 / 按压中 / 松手后…" style="background:#0f1828;border:1px solid #2a3a55;color:#e6edf7;border-radius:6px;padding:3px 6px;font:inherit;width:180px"></td>
+          <td class="big" v-for="(v, i) in s.q" :key="i">{{ fmt(deg(v), 2) }}</td>
+          <td :class="cls(snapDelta(s), 0.1, 0.3)">{{ fmt(snapDelta(s), 2) }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </main>
+</div>
+
+<script src="/static/vendor/vue.global.prod.js"></script>
+<script>
+const { createApp, ref, computed } = Vue
+createApp({
+  setup() {
+    const params = new URLSearchParams(location.search)
+    const arm = ref(params.get('arm') === 'left' ? 'left' : (params.get('arm') === 'right' ? 'right' : 'left'))
+    const names = ref([]), q = ref([]), dq = ref(null), desired = ref(null), tau = ref(null)
+    const engaged = ref(false), source = ref(''), err = ref('')
+    const baseline = ref(null), peak = ref([]), snapshots = ref([])
+    const hz = ref(0)
+    let ticks = 0, lastHz = performance.now()
+
+    const deg = (r) => (r == null ? NaN : r * 180 / Math.PI)
+    const fmt = (v, n) => (Number.isFinite(v) ? v.toFixed(n) : '—')
+    const fmtSigned = (v, n) => (Number.isFinite(v) ? (v > 0 ? '+' : '') + v.toFixed(n) : '—')
+    const sign = (v) => (Math.abs(v) < 0.005 ? 'zero' : (v > 0 ? 'pos' : 'neg'))
+    const cls = (v, warn, bad) => (!Number.isFinite(v) ? '' : (v >= bad ? 'bad' : (v >= warn ? 'warn' : '')))
+
+    const maxAbsDelta = computed(() => baseline.value
+      ? Math.max(...q.value.map((v, i) => Math.abs(deg(v) - deg(baseline.value[i])))) : NaN)
+    const peakAbsDelta = computed(() => (peak.value.length ? Math.max(...peak.value) : NaN))
+    const maxAbsTrack = computed(() => desired.value
+      ? Math.max(...q.value.map((v, i) => Math.abs(deg(v) - deg(desired.value[i])))) : NaN)
+
+    function setBaseline() { baseline.value = [...q.value]; peak.value = q.value.map(() => 0) }
+    function resetPeak() { peak.value = q.value.map(() => 0) }
+    function setArm(a) { arm.value = a; baseline.value = null; resetPeak(); history.replaceState(null, '', `?arm=${a}`) }
+    function snapshot() {
+      snapshots.value.push({ t: Date.now(), time: new Date().toLocaleTimeString('zh-CN', { hour12: false }), note: '', q: [...q.value], desired: desired.value ? [...desired.value] : null, tau: tau.value ? [...tau.value] : null })
+    }
+    function snapDelta(s) {
+      const first = snapshots.value[0]
+      if (!first || first === s) return 0
+      return Math.max(...s.q.map((v, i) => Math.abs(deg(v) - deg(first.q[i]))))
+    }
+
+    async function poll() {
+      try {
+        const r = await fetch(`/api/joints?arm=${arm.value}&t=${Date.now()}`)
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        const d = await r.json()
+        if (d.arm && d.arm !== arm.value) err.value = `后端当前读的是 ${d.arm === 'left' ? '左' : '右'}臂（另一臂已接管）`
+        else err.value = ''
+        names.value = d.joint_names || []
+        q.value = d.q || []
+        dq.value = d.dq
+        desired.value = d.desired_rad
+        tau.value = d.tau_est_nm
+        engaged.value = Boolean(d.engaged)
+        source.value = d.source || ''
+        if (baseline.value) {
+          peak.value = q.value.map((v, i) => Math.max(peak.value[i] || 0, Math.abs(deg(v) - deg(baseline.value[i]))))
+        }
+        ticks += 1
+        const now = performance.now()
+        if (now - lastHz > 1000) { hz.value = ticks * 1000 / (now - lastHz); ticks = 0; lastHz = now }
+      } catch (e) {
+        err.value = `读取失败：${e.message}`
+      } finally {
+        setTimeout(poll, 50)
+      }
+    }
+    poll()
+
+    return { arm, names, q, dq, desired, tau, engaged, source, err, baseline, peak, snapshots, hz,
+      deg, fmt, fmtSigned, sign, cls, maxAbsDelta, peakAbsDelta, maxAbsTrack,
+      setBaseline, resetPeak, setArm, snapshot, snapDelta }
+  },
+}).mount('#app')
+</script>
+</body>
+</html>

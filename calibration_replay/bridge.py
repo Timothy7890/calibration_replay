@@ -282,6 +282,11 @@ class H2ArmBridge:
                 ),
                 "cmd_gap_rad": cmd_gap,
                 "gyro_rad_s": getattr(controller, "_calibration_gyro", None),
+                # 接管期间额外暴露：控制目标、限速后下发值、电机估计力矩（/test 读数页用）
+                "desired_rad": desired,
+                "cmd_rad": cmd,
+                "tau_est_nm": status.get("tau_est_nm"),
+                "engaged": True,
             }
         q = self._read_only_q()
         return {
@@ -290,6 +295,10 @@ class H2ArmBridge:
             "timestamp": time.monotonic(),
             "cmd_gap_rad": None,
             "gyro_rad_s": None,
+            "desired_rad": None,
+            "cmd_rad": None,
+            "tau_est_nm": None,
+            "engaged": False,
         }
 
     def status(self) -> dict[str, Any]:
