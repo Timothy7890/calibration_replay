@@ -1,0 +1,7 @@
+.venv/
+.testdeps/
+__pycache__/
+.pytest_cache/
+*.pyc
+replay_data/
+logs/

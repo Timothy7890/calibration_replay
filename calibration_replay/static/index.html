@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>H2 标定轨迹复现</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div id="app" v-cloak>
+
+  <!-- ===================== 顶栏：状态 + 紧急停止 ===================== -->
+  <header class="topbar">
+    <div class="brand">
+      <h1>H2 标定轨迹复现</h1>
+      <span class="sub">左臂 / 右臂由计划选择 · 必须全程人工监护 · 采集端必须 <code>--no-arm</code></span>
+    </div>
+    <div class="status-block" :class="'st-' + status.state">
+      <div class="state">{{ stateName[status.state] || status.state }}</div>
+      <div class="msg">{{ status.message || (online ? '' : '无法连接 8090 服务') }}</div>
+    </div>
+    <div class="arm-block">
+      <span class="pill" :class="arm.engaged ? 'on' : ''">{{ arm.engaged ? (armName[arm.arm] || '') + '已接管' : '未接管' }}</span>
+      <span class="pill" v-if="capability.available" :title="'18000 能力中心当前激活：' + (armName[capability.arm] || capability.arm) + ' / ' + capability.hand_name" :style="plan && capability.arm && capability.arm !== plan.arm ? 'background:#5a2023' : ''">18000：{{ armName[capability.arm] || capability.arm || '?' }} · {{ capability.hand_name || '' }}</span>
+      <span class="pill muted" v-else title="18000 能力中心不可达">18000 离线</span>
+      <span class="pill" v-if="arm.guide" style="background:#4a3a10">拖动中</span>
+      <span class="pill" v-if="arm.motion_enabled" style="background:#173a58">运动使能</span>
+      <span class="pill muted" v-if="status.mock">mock</span>
+    </div>
+    <button class="stop" @click="act('stop')" title="急停：立刻丢弃剩余轨迹，手臂在当前位置冻结并刚性保持">■ 急停</button>
+  </header>
+
+  <div class="layout">
+
+    <!-- ===================== 左栏：计划列表 ===================== -->
+    <aside class="side">
+      <h2>计划</h2>
+      <div class="plan-list">
+        <div v-for="p in plans" :key="p.id" class="plan-item" :class="{active: plan && plan.id===p.id}" @click="loadPlan(p.id)">
+          <div class="plan-name">{{ p.name }}</div>
+          <div class="plan-meta">
+            <span class="tag" :class="'arm-' + (p.arm || 'right')">{{ armName[p.arm || 'right'] }}</span>
+            <span class="tag">{{ targetName[p.target] || p.target }}</span>
+            <span class="tag" :class="p.draft ? 'warn' : 'ok'">{{ p.draft ? '草稿' : '可运行' }}</span>
+            <span class="muted">{{ p.nodes.length }} 节点</span>
+          </div>
+        </div>
+        <div v-if="!plans.length" class="empty">还没有计划，请在下方新建或导入</div>
+      </div>
+
+      <details class="box" open>
+        <summary>从 3D 采集 episode 导入（复现已采过的手臂用这个）</summary>
+        <p class="muted small">手臂按 episode 里记录的 arm 自动识别（左/右）。</p>
+        <label>计划名称</label><input v-model="newName">
+        <label>episode 目录</label><input v-model="import3dDir">
+        <label>解算结果 handeye3d_result.json（可选）</label><input v-model="import3dResult" placeholder="留空则全部作为采样点">
+        <button class="primary full" @click="import3D">导入为新计划</button>
+      </details>
+      <details class="box">
+        <summary>新建空计划</summary>
+        <label>计划名称</label><input v-model="newName">
+        <label>手臂</label>
+        <div class="seg"><button :class="{on: newArm==='left'}" @click="newArm='left'">左臂</button><button :class="{on: newArm==='right'}" @click="newArm='right'">右臂</button></div>
+        <label>采集目标</label>
+        <select v-model="newTarget"><option v-for="(n,k) in targetName" :value="k">{{ n }}</option></select>
+        <button class="full" @click="createPlan">新建</button>
+      </details>
+      <details class="box">
+        <summary>导入指定 2D 会话</summary>
+        <p class="muted small">导入 hand_eye_2D 头/腰两个已解算会话的内点姿态。</p>
+        <button class="full" @click="importDefaults">导入 2D 会话</button>
+      </details>
+    </aside>
+
+    <!-- ===================== 主区：分步操作 ===================== -->
+    <main class="main" v-if="plan">
+
+      <!-- 步骤条 -->
+      <nav class="steps">
+        <a v-for="s in steps" :key="s.id" :href="'#'+s.id" class="step" :class="s.status">
+          <span class="num">{{ s.n }}</span><span>{{ s.title }}</span>
+        </a>
+      </nav>
+
+      <div class="plan-head">
+        <input class="title" v-model="plan.name" @change="savePlan" title="点击修改名称，回车保存">
+        <div class="seg big" title="本计划驱动哪条手臂。已有节点的计划不能直接改臂，请用镜像生成另一侧">
+          <button :class="{on: plan.arm==='left'}" @click="setArm('left')">左臂</button>
+          <button :class="{on: plan.arm==='right'}" @click="setArm('right')">右臂</button>
+        </div>
+        <button class="sm" @click="mirrorPlan" :title="'按矢状面镜像所有节点，新建一份' + armName[otherArm(plan.arm)] + '草稿计划'">镜像为{{ armName[otherArm(plan.arm)] }}计划</button>
+        <span class="tag">{{ targetName[plan.target] || plan.target }}</span>
+        <span class="tag" :class="plan.draft ? 'warn' : 'ok'">{{ plan.draft ? '草稿（未录原点）' : '可运行' }}</span>
+        <span class="muted">采集服务 {{ plan.base_url }}</span>
+        <button class="danger sm right" @click="deletePlan">删除计划</button>
+      </div>
+
+      <!-- ---------- 1 节点 ---------- -->
+      <section class="card" id="s1">
+        <h2><span class="num">1</span> 轨迹节点 <span class="muted small">运动顺序 = 表格顺序；路线 原点 → 各点 → 直接回原点（末点离原点太远时需在末尾补过渡点）</span></h2>
+        <div class="hint" v-if="gaps.length">
+          <b>{{ gaps.length }} 处跳变超过 {{ plan.motion.max_adjacent_delta_rad }} rad</b>
+          <span v-if="gaps.some(g => g.ret)">（含回程：末点 → 原点 {{ returnDelta.toFixed(3) }} rad）</span>，运行前必须补过渡点。
+          <button class="sm primary" @click="autoInsertTransits">自动补过渡点</button>
+          <span class="muted small">（自动补的过渡点是关节空间直线插值，请在预览里确认不会碰撞）</span>
+        </div>
+        <div class="toolbar">
+          <span class="muted">添加节点：</span>
+          <input v-model="nodeName" placeholder="名称（可空）" style="width:160px">
+          <button @click="recordNode('sample')" :disabled="!online">记录当前姿态为采样点</button>
+          <button @click="recordNode('transit')" :disabled="!online">记录当前姿态为过渡点</button>
+          <input v-model="manualQ" placeholder="手工 7 个弧度，逗号分隔" class="mono" style="width:300px">
+          <select v-model="manualRole"><option value="transit">过渡</option><option value="sample">采样</option></select>
+          <button @click="manualNode">添加手工姿态</button>
+        </div>
+        <table class="nodes">
+          <thead><tr><th>#</th><th>启用</th><th>角色</th><th>名称</th><th title="与上一启用节点的最大单关节差">Δ上一点</th><th>关节角 rad</th><th></th></tr></thead>
+          <tbody>
+            <tr v-for="(n,i) in plan.nodes" :key="n.id" :class="{disabled: !n.enabled, home: n.role==='home'}">
+              <td class="muted">{{ i+1 }}</td>
+              <td><input type="checkbox" :checked="n.enabled" @change="nodeEdit(n.id,'enabled',$event.target.checked)"></td>
+              <td>
+                <select :value="n.role" @change="nodeEdit(n.id,'role',$event.target.value)" :class="'role-'+n.role">
+                  <option value="home">原点</option><option value="transit">过渡</option><option value="sample">采样</option>
+                </select>
+              </td>
+              <td><input :value="n.name" @change="nodeEdit(n.id,'name',$event.target.value)"></td>
+              <td :class="{bad: deltas[i] > plan.motion.max_adjacent_delta_rad}" class="mono">{{ deltas[i]==null ? '—' : deltas[i].toFixed(3) }}</td>
+              <td><input class="mono q" :value="fmtQ(n.q_rad)" @change="nodeEdit(n.id,'q_rad',parseQ($event.target.value))"></td>
+              <td class="ops">
+                <button class="sm" @click="moveNode(i,-1)" :disabled="i===0">↑</button>
+                <button class="sm" @click="moveNode(i,1)" :disabled="i===plan.nodes.length-1">↓</button>
+                <button class="sm danger" @click="removeNode(n.id)">×</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-if="!plan.nodes.length" class="empty">没有节点。用「记录当前姿态」或在左侧导入。</div>
+      </section>
+
+      <!-- ---------- 2 接管 & 原点 ---------- -->
+      <section class="card" id="s2">
+        <h2><span class="num">2</span> 接管手臂并录制原点</h2>
+        <p class="muted small">接管的是本计划的 <b>{{ armName[plan.arm] }}</b>，接管后才会发布 rt/arm_sdk。流程：<b>接管</b>（刚性保持）→ <b>拖动</b>（可用手拖臂）→ 摆到起点 → <b>抓住保持</b> → <b>录为原点</b>。全程有人扶臂。</p>
+        <p class="hint" v-if="arm.engaged && arm.arm && arm.arm !== plan.arm">当前接管的是 <b>{{ armName[arm.arm] }}</b>，而这个计划是 <b>{{ armName[plan.arm] }}</b>：先「解除接管」，再重新接管。</p>
+        <div class="toolbar">
+          <button class="primary" @click="act('engage')" :disabled="arm.engaged">接管{{ armName[plan.arm] }}并保持</button>
+          <button @click="act('guide')" :disabled="!arm.engaged || arm.guide">拖动模式</button>
+          <button @click="act('catch')" :disabled="!arm.engaged || !arm.guide">抓住当前位置并保持</button>
+          <button class="primary" @click="recordNode('home')" :disabled="!online">把当前姿态录为原点</button>
+          <button class="danger" @click="act('disarm')" :disabled="!arm.engaged || running">解除接管（先扶住手臂）</button>
+          <button class="danger" @click="act('stop')" title="急停：冻结在当前位置并刚性保持">■ 急停</button>
+        </div>
+        <div class="two">
+          <div>
+            <h3>{{ armName[joints.arm || plan.arm] }}实测关节</h3>
+            <table class="joints"><tr v-for="(name,i) in joints.names" :key="name"><td class="muted">{{ shortJoint(name) }}</td><td class="mono">{{ fmt(joints.q[i]) }}</td>
+              <td class="mono muted" v-if="home">Δ原点 {{ fmt(Math.abs(joints.q[i]-home.q_rad[i])) }}</td></tr></table>
+          </div>
+          <div>
+            <h3>原点</h3>
+            <div v-if="home"><div class="mono">{{ fmtQ(home.q_rad) }}</div>
+              <div :class="homeDelta > plan.motion.max_start_delta_rad ? 'bad' : 'ok'" style="margin-top:6px">
+                当前姿态与原点最大差 {{ fmt(homeDelta) }} rad（启动要求 ≤ {{ plan.motion.max_start_delta_rad }}）
+              </div></div>
+            <div v-else class="warn-text">还没有原点。把手臂摆到起点后点「把当前姿态录为原点」。</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- 3 校验 ---------- -->
+      <section class="card" id="s3">
+        <h2><span class="num">3</span> 运行前校验</h2>
+        <div class="toolbar">
+          <button class="primary" @click="validatePlan">校验计划</button>
+          <span v-if="validation" :class="validation.ok ? 'ok' : 'bad'">{{ validation.ok ? '✓ 校验通过，可以在人工监护下运行' : '✗ 有 ' + validation.errors.length + ' 个问题' }}</span>
+        </div>
+        <ul v-if="validation && !validation.ok" class="errors"><li v-for="e in validation.errors">{{ e }}</li></ul>
+      </section>
+
+      <!-- ---------- 4 预览导出 ---------- -->
+      <section class="card" id="s4">
+        <h2><span class="num">4</span> 轨迹预览 <span class="muted small">按运行时的路线和速度在页面里回放，不动机器人</span></h2>
+        <div class="toolbar">
+          <button class="primary" @click="loadPreview" :disabled="previewLoading">{{ previewLoading ? '生成中…' : (preview ? '重新生成预览' : '生成预览') }}</button>
+          <template v-if="preview">
+            <button @click="togglePlay">{{ previewPlaying ? '❚❚ 暂停' : (previewFrame >= preview.frames.length-1 ? '↻ 重播' : '▶ 播放') }}</button>
+            <label class="inline" style="margin:0">速度
+              <select v-model.number="previewSpeed" @change="viewer.setSpeed(previewSpeed)" style="width:auto"><option :value="1">1×</option><option :value="2">2×</option><option :value="4">4×</option><option :value="8">8×</option></select>
+            </label>
+            <button class="sm" @click="viewer.resetView()">重置视角</button>
+            <span class="muted small">共 {{ preview.frames.length }} 帧，运行约 {{ preview.duration_s.toFixed(0) }} s（{{ (preview.duration_s/60).toFixed(1) }} 分钟）</span>
+          </template>
+          <span v-if="previewError" class="bad small">{{ previewError }}</span>
+        </div>
+        <div class="viewer-wrap" v-show="preview">
+          <div class="viewer" ref="viewerEl"></div>
+          <div class="viewer-side" v-if="preview">
+            <div class="viewer-now">
+              <div class="muted small">当前 {{ (previewFrame/(preview.frames.length-1)*preview.duration_s).toFixed(1) }} s</div>
+              <div class="big-label">{{ currentStop ? (currentStop.leg==='reverse' ? '返回 · ' : '') + currentStop.name : '' }}</div>
+            </div>
+            <input type="range" min="0" :max="preview.frames.length-1" :value="previewFrame" @input="scrub($event.target.value)" class="scrub">
+            <ol class="stops">
+              <li v-for="(s,i) in preview.stops" :key="i" :class="{cur: currentStopIndex===i, reverse: s.leg==='reverse'}" @click="scrub(s.frame_index)">
+                <span class="dot" :class="'role-'+s.role"></span>{{ s.name }}<span class="muted small right">{{ s.time_s.toFixed(0) }}s</span>
+              </li>
+            </ol>
+            <div class="legend small muted"><span class="dot role-home"></span>原点 <span class="dot role-sample"></span>采样（触发拍摄） <span class="dot role-transit"></span>过渡 · 黄线 = 腕部轨迹</div>
+          </div>
+        </div>
+        <details style="margin-top:10px">
+          <summary class="muted small">另存为 IK_replay 离线轨迹（可选）</summary>
+          <div class="toolbar">
+            <input v-model="exportDir" style="width:380px">
+            <button @click="exportPlan">导出</button>
+            <span class="muted small">写入 <code>data/sequences/</code>，可在 18002 重力台「离线轨迹回放」里对比查看。</span>
+          </div>
+          <div v-if="exportResult" class="ok small">已导出 {{ exportResult.frames }} 帧、{{ exportResult.waypoints }} 个路点 → {{ exportResult.sequence }}</div>
+        </details>
+      </section>
+
+      <!-- ---------- 5 运行 ---------- -->
+      <section class="card" id="s5">
+        <h2><span class="num">5</span> 运行</h2>
+        <p class="muted small">启动条件：已接管、当前姿态在原点附近、校验通过、8132 采集端没开手臂控制。每到采样点稳定后自动触发拍摄。</p>
+        <div class="toolbar">
+          <input v-model="runId" placeholder="运行名：英文/数字/._-（可空，自动 计划名_时间）" style="width:300px" title="本次运行的数据目录名：calibration_replay_data/runs/<运行名>/">
+          <label class="inline" title="判定手臂静止后，再等这么久才触发拍摄；改动后自动保存">静止后等待 <input type="number" min="0" step=".1" v-model.number="plan.stability.capture_delay_s" @change="savePlan" style="width:70px"> s 再拍</label>
+        </div>
+        <div class="toolbar">
+          <button class="primary" @click="act('engage')" :disabled="arm.engaged" :title="'接管' + armName[plan.arm] + '并刚性保持当前姿态（开始发布 rt/arm_sdk）'">接管{{ armName[plan.arm] }}并保持</button>
+          <button class="primary big" @click="run" :disabled="running || !arm.engaged">▶ 开始运行</button>
+          <button @click="act('pause')" :disabled="!running || status.pause_requested">当前点后暂停</button>
+          <button @click="act('resume')" :disabled="status.state!=='paused'">继续</button>
+          <button class="danger big" @click="act('stop')" title="急停：立刻丢弃剩余轨迹，手臂在当前位置冻结并刚性保持（不断电、不会掉落）">■ 急停（冻结保持）</button>
+          <button class="danger right" @click="act('disarm')" :disabled="!arm.engaged || running" title="停止发布 rt/arm_sdk，手臂交还机器人本体控制；操作前先扶住手臂">解除接管（先扶住手臂）</button>
+        </div>
+        <p class="muted small">急停 = 冻结在当前位置并刚性保持，随后可用「拖动模式」把手臂挪到安全位置再「解除接管」。顶栏的「■ 急停」在任何滚动位置都可点。</p>
+        <p v-if="status.run_dir" class="small mono">数据目录：{{ status.run_dir }}<span class="muted">（episode_0000… + run.json）</span></p>
+        <div v-if="status.progress && status.progress.route_count" class="progress">
+          <div class="bar"><div class="fill" :style="{width: (100*(status.progress.route_index+1)/status.progress.route_count)+'%'}"></div></div>
+          <div class="small">{{ status.progress.route_index+1 }} / {{ status.progress.route_count }} · {{ status.progress.leg==='reverse' ? '返回' : '前向' }} · {{ status.progress.node_name }}</div>
+        </div>
+        <h3 v-if="status.captures && status.captures.length">采集结果（{{ status.captures.length }}）</h3>
+        <table v-if="status.captures && status.captures.length" class="captures">
+          <tr v-for="c in status.captures" :key="c.capture_id"><td>{{ c.node_id }}</td><td class="mono muted">{{ c.capture_id }}</td><td class="mono small">{{ summarize(c.result) }}</td></tr>
+        </table>
+      </section>
+
+      <!-- ---------- 高级参数 ---------- -->
+      <details class="card" id="adv">
+        <summary><h2 style="display:inline">高级参数</h2> <span class="muted small">一般不用改</span></summary>
+        <div class="grid3">
+          <div><label>采集目标</label><select v-model="plan.target"><option v-for="(n,k) in targetName" :value="k">{{ n }}</option></select></div>
+          <div><label>采集服务 URL</label><input v-model="plan.base_url"></div>
+          <div><label>2D 相机序列号</label><input v-model="plan.camera_serial" placeholder="仅 2D"></div>
+        </div>
+        <label class="inline"><input type="checkbox" v-model="plan.require_corners"> 2D 拍摄必须确认完整棋盘格角点</label>
+        <h3>运动</h3>
+        <div class="grid3">
+          <div><label>最大速度 rad/s</label><input type="number" step=".01" v-model.number="plan.motion.vmax_rad_s"></div>
+          <div><label>最大加速度 rad/s²</label><input type="number" step=".01" v-model.number="plan.motion.amax_rad_s2"></div>
+          <div><label>最短段时长 s</label><input type="number" step=".1" v-model.number="plan.motion.min_duration_s"></div>
+          <div><label>启动时距原点最大差 rad</label><input type="number" step=".01" v-model.number="plan.motion.max_start_delta_rad"></div>
+          <div><label>相邻点最大差 rad</label><input type="number" step=".05" v-model.number="plan.motion.max_adjacent_delta_rad"></div>
+          <div><label>控制频率 Hz</label><input type="number" v-model.number="plan.motion.rate_hz"></div>
+        </div>
+        <h3>到位判定（以手臂自身静止为准：编码器 + 躯干 IMU；规划值只是参考）</h3>
+        <div class="grid3">
+          <div><label>静止连续窗口 s</label><input type="number" step=".1" v-model.number="plan.stability.window_s"></div>
+          <div><label>编码器速度上限 rad/s</label><input type="number" step=".01" v-model.number="plan.stability.max_velocity_rad_s"></div>
+          <div><label>窗口内关节漂移上限 rad</label><input type="number" step=".005" v-model.number="plan.stability.max_range_rad"></div>
+          <div><label>躯干 IMU 角速度上限 rad/s</label><input type="number" step=".01" v-model.number="plan.stability.max_gyro_rad_s"></div>
+          <div><label>等待指令送达最长 s</label><input type="number" step=".5" v-model.number="plan.stability.command_settle_s"></div>
+          <div><label>状态新鲜度 s</label><input type="number" step=".05" v-model.number="plan.stability.freshness_s"></div>
+          <div><label>总超时 s</label><input type="number" step="1" v-model.number="plan.stability.timeout_s"></div>
+          <div><label>静止后等待再拍 s</label><input type="number" min="0" step=".1" v-model.number="plan.stability.capture_delay_s"></div>
+          <div><label>与规划偏差告警阈值 rad（仅记录，不阻止）</label><input type="number" step=".005" v-model.number="plan.stability.max_error_rad"></div>
+        </div>
+        <div class="toolbar"><button class="primary" @click="savePlan">保存参数</button></div>
+      </details>
+
+      <details class="card" id="log">
+        <summary><h2 style="display:inline">事件日志</h2></summary>
+        <pre class="log">{{ logText }}</pre>
+      </details>
+    </main>
+
+    <main class="main" v-else>
+      <div class="empty big">
+        <p>先在左侧选择一个计划，或者导入 3D 采集 episode 生成新计划。</p>
+      </div>
+    </main>
+  </div>
+
+  <!-- 提示条 -->
+  <div class="toast" v-if="toast" :class="toast.kind" @click="toast=null">{{ toast.text }}</div>
+</div>
+
+<script type="importmap">{"imports":{"three":"/static/vendor/three.module.js"}}</script>
+<script src="/static/vendor/vue.global.prod.js"></script>
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>
