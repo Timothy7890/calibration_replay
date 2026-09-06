@@ -117,7 +117,7 @@
           </label>
         </div>
         <table class="nodes">
-          <thead><tr><th>#</th><th>启用</th><th>角色</th><th>名称</th><th title="与上一启用节点的最大单关节差">Δ上一点</th><th>关节角 rad</th><th></th></tr></thead>
+          <thead><tr><th>#</th><th>启用</th><th>角色</th><th title="点进去直接改，回车或点别处保存">名称 <span class="muted">✎</span></th><th title="与上一启用节点的最大单关节差">Δ上一点</th><th title="可编辑：7 个弧度，逗号分隔">关节角 rad <span class="muted">✎</span></th><th></th></tr></thead>
           <tbody>
             <tr v-for="(n,i) in plan.nodes" :key="n.id" :class="{disabled: !n.enabled, home: n.role==='home'}">
               <td class="muted">{{ i+1 }}</td>
@@ -127,9 +127,9 @@
                   <option value="home">原点</option><option value="transit">过渡</option><option value="sample">采样</option>
                 </select>
               </td>
-              <td><input :value="n.name" @change="nodeEdit(n.id,'name',$event.target.value)"></td>
+              <td><input class="editable" :value="n.name" placeholder="点此改名" title="可编辑：回车或点别处保存" @change="nodeEdit(n.id,'name',$event.target.value)"></td>
               <td :class="{bad: deltas[i] > plan.motion.max_adjacent_delta_rad}" class="mono">{{ deltas[i]==null ? '—' : deltas[i].toFixed(3) }}</td>
-              <td><input class="mono q" :value="fmtQ(n.q_rad)" @change="nodeEdit(n.id,'q_rad',parseQ($event.target.value))"></td>
+              <td><input class="mono q editable" :value="fmtQ(n.q_rad)" title="可编辑：7 个弧度，逗号分隔" @change="nodeEdit(n.id,'q_rad',parseQ($event.target.value))"></td>
               <td class="ops">
                 <button class="sm" @click="moveNode(i,-1)" :disabled="i===0">↑</button>
                 <button class="sm" @click="moveNode(i,1)" :disabled="i===plan.nodes.length-1">↓</button>
@@ -152,6 +152,7 @@
           <button @click="act('guide')" :disabled="!arm.engaged || arm.guide">拖动模式</button>
           <button @click="act('catch')" :disabled="!arm.engaged || !arm.guide">抓住当前位置并保持</button>
           <button class="primary" @click="recordNode('home')" :disabled="!online">把当前姿态录为原点</button>
+          <input v-model="nodeName" placeholder="新点名称（可空，默认带时间）" style="width:190px" title="录为采样点/过渡点时使用；录完自动清空。表格里的名称随时可以再改">
           <button class="primary" @click="recordNode('sample')" :disabled="!online" :title="autoPlace ? '自动放到绕路最小的位置' : '追加到节点表末尾'">录为采样点</button>
           <button @click="recordNode('transit')" :disabled="!online" :title="autoPlace ? '自动放到绕路最小的位置' : '追加到节点表末尾'">录为过渡点</button>
           <button class="danger" @click="act('disarm')" :disabled="!arm.engaged || running">解除接管（先扶住手臂）</button>

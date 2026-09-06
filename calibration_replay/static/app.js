@@ -235,7 +235,10 @@ createApp({
     const recordNode = (role) => guard(async () => {
       const label = { home: "原点", transit: "过渡点", sample: "采样点" }[role];
       const place = autoPlace.value && role !== "home" ? "auto" : "append";
-      const node = await post(`/api/plans/${plan.value.id}/nodes/record`, { role, name: nodeName.value || label, place });
+      // 默认名带时间，避免多个手录点都叫「采样点」分不清
+      const stamp = new Date().toTimeString().slice(0, 5).replace(":", "");
+      const defaultName = role === "home" ? label : `${label}_${stamp}`;
+      const node = await post(`/api/plans/${plan.value.id}/nodes/record`, { role, name: nodeName.value || defaultName, place });
       nodeName.value = "";
       await reload();
       const idx = plan.value.nodes.findIndex((n) => n.id === node.id);

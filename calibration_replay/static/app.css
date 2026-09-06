@@ -58,6 +58,9 @@ th{color:var(--muted);font-weight:600}
 table.nodes td input,table.nodes td select{padding:4px 6px}table.nodes .q{min-width:330px}
 table.nodes tr.disabled td{opacity:.45}table.nodes tr.home td{background:#13202c}
 table.nodes .ops{white-space:nowrap}
+table.nodes input.editable{border-style:dashed;border-color:#3a4552;background:transparent;cursor:text}
+table.nodes input.editable:hover{border-color:var(--accent,#5b9cf6);background:#0e1319}
+table.nodes input.editable:focus{border-style:solid;border-color:var(--accent,#5b9cf6);background:#0e1319;outline:none}
 select.role-home{color:#9fd0ff}select.role-sample{color:#7fe0b0}select.role-transit{color:var(--muted)}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 table.joints td{padding:2px 8px}
