@@ -127,9 +127,11 @@
                   <option value="home">原点</option><option value="transit">过渡</option><option value="sample">采样</option>
                 </select>
               </td>
-              <td><input class="editable" :value="n.name" placeholder="点此改名" title="可编辑：回车或点别处保存" @change="nodeEdit(n.id,'name',$event.target.value)"></td>
+              <td><input class="editable" :value="editShown(n.id,'name',n.name)" placeholder="点此改名" title="可编辑：回车或点别处保存，Esc 放弃"
+                    @focus="editStart(n.id,'name',n.name)" @input="editInput" @keydown.enter="editCommit(n.id,'name',n.name,$event)" @keydown.esc="editCancel" @blur="editCommit(n.id,'name',n.name)"></td>
               <td :class="{bad: deltas[i] > plan.motion.max_adjacent_delta_rad}" class="mono">{{ deltas[i]==null ? '—' : deltas[i].toFixed(3) }}</td>
-              <td><input class="mono q editable" :value="fmtQ(n.q_rad)" title="可编辑：7 个弧度，逗号分隔" @change="nodeEdit(n.id,'q_rad',parseQ($event.target.value))"></td>
+              <td><input class="mono q editable" :value="editShown(n.id,'q_rad',fmtQ(n.q_rad))" title="可编辑：7 个弧度，逗号分隔；回车保存，Esc 放弃"
+                    @focus="editStart(n.id,'q_rad',fmtQ(n.q_rad))" @input="editInput" @keydown.enter="editCommit(n.id,'q_rad',fmtQ(n.q_rad),$event)" @keydown.esc="editCancel" @blur="editCommit(n.id,'q_rad',fmtQ(n.q_rad))"></td>
               <td class="ops">
                 <button class="sm" @click="moveNode(i,-1)" :disabled="i===0">↑</button>
                 <button class="sm" @click="moveNode(i,1)" :disabled="i===plan.nodes.length-1">↓</button>

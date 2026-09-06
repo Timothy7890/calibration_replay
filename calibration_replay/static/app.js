@@ -1,7 +1,7 @@
 /* H2 标定轨迹复现 —— Vue 3 前端（本地 vendor，无 CDN、无构建步骤） */
 import { createViewer } from "/static/viewer.js";
 
-const { createApp, ref, computed, onMounted, nextTick } = Vue;
+const { createApp, ref, reactive, computed, onMounted, nextTick } = Vue;
 
 const stateName = {
   idle: "空闲", preflight: "预检中", armed: "已接管", moving: "前向运动", settling: "稳定确认",
@@ -222,6 +222,29 @@ createApp({
     const nodeEdit = (id, key, value) => guard(async () => {
       plan.value = await api(`/api/plans/${plan.value.id}/nodes/${id}`, { method: "PATCH", body: JSON.stringify({ [key]: value }) });
     });
+    // 表格内联编辑：页面每 250ms 刷新会重渲染，若直接绑 :value 会把正在输入的内容冲掉。
+    // 聚焦时切到本地草稿，失焦/回车才提交；Esc 放弃。
+    const edit = reactive({ key: null, text: "" });
+    const editKey = (id, field) => `${id}:${field}`;
+    const editShown = (id, field, shown) => (edit.key === editKey(id, field) ? edit.text : shown);
+    const editStart = (id, field, shown) => { edit.key = editKey(id, field); edit.text = shown; };
+    const editInput = (e) => { edit.text = e.target.value; };
+    const editCancel = (e) => { edit.key = null; e.target.blur(); };
+    const editCommit = (id, field, shown, e) => {
+      if (edit.key !== editKey(id, field)) return;
+      const text = edit.text;
+      edit.key = null;
+      if (text === shown) return;
+      if (field === "name") {
+        if (!text.trim()) return;
+        nodeEdit(id, "name", text.trim());
+      } else if (field === "q_rad") {
+        const q = parseQ(text);
+        if (q.length !== 7 || q.some((x) => !Number.isFinite(x))) { say("关节角需要 7 个有限数值"); return; }
+        nodeEdit(id, "q_rad", q);
+      }
+      if (e && e.type === "keydown") e.target.blur();
+    };
     const moveNode = (i, d) => guard(async () => {
       const ids = plan.value.nodes.map((n) => n.id);
       const j = i + d;
@@ -392,6 +415,7 @@ createApp({
       fmt, fmtQ, parseQ, shortJoint, summarize,
       loadPlans, loadPlan, savePlan, createPlan, deletePlan, import3D, importDefaults,
       nodeEdit, moveNode, removeNode, recordNode, manualNode, autoInsertTransits, returnDelta, autoPlace, autoplaceNode,
+      editShown, editStart, editInput, editCancel, editCommit,
       validatePlan, exportPlan, act, run,
       viewerEl, preview, previewLoading, previewError, previewFrame, previewPlaying, previewSpeed,
       currentStop, currentStopIndex, loadPreview, togglePlay, scrub,
