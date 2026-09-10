@@ -26,12 +26,13 @@ STATES = {
     "fault",
     "stopped",
 }
-SAFE_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+# 允许中文等 Unicode 字母/数字（\w 含 CJK）、. _ -；不能有空格、斜杠，不能以 . 开头
+SAFE_RUN_ID_RE = re.compile(r"^[^\W.][\w.-]{0,127}$")
 
 
 def default_run_id(plan_name: str | None = None) -> str:
-    """``<plan-slug>_<local time>``; the slug keeps only safe ASCII characters."""
-    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", str(plan_name or "")).strip("._-")
+    """``<plan-slug>_<local time>``; the slug keeps letters/digits (incl. CJK), ``.``, ``_``, ``-``."""
+    slug = re.sub(r"[^\w.-]+", "-", str(plan_name or "")).strip("._-")
     slug = slug or "run"
     return f"{slug}_{datetime.now():%Y%m%d-%H%M%S}"
 
@@ -44,7 +45,7 @@ def safe_run_id(value: str | None = None, *, plan_name: str | None = None) -> st
     )
     if run_id in (".", "..") or not SAFE_RUN_ID_RE.fullmatch(run_id):
         raise ValueError(
-            "run_id must be 1-128 safe characters: letters, digits, '.', '_' or '-'"
+            "run_id must be 1-128 characters: letters/digits (中文可), '.', '_' or '-'; no spaces or slashes"
         )
     return run_id
 

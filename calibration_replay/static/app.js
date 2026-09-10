@@ -33,7 +33,7 @@ function zh(msg) {
     .replace(/hand hold failed: 18000 has no active hand.*/g, "18000 没有激活的灵巧手，无法保持零位；到 18000 激活手型，或在运行区取消「拍摄期间保持灵巧手零位」")
     .replace(/hand hold failed: (.*)/g, (m, r) => `灵巧手零位保持失败（8132/18089）：${r}`)
     .replace(/run name already used: .*?already exists at (\S+)/g, "运行名已被用过（$1），换一个名字")
-    .replace(/run_id must be 1-128 safe characters.*/g, "运行名只能用英文字母、数字、. _ -（1～128 个字符）")
+    .replace(/run_id must be 1-128 characters.*/g, "运行名可用中英文、数字、. _ -（1～128 个字符），不能含空格或斜杠")
     .replace(/node (\S+) joint (\d+)=([-\d.]+) outside \[([-\d.]+), ([-\d.]+)\]/g, "节点 $1 第 $2 关节 $3 超出限位 [$4, $5]")
     .replace(/cannot engage during a run/g, "运行中不能重复接管")
     .replace(/plan is for the (left|right) arm but the (left|right) arm is engaged; disarm and engage the plan's arm/g, (m, a, b) => `计划是${armName[a]}，但当前接管的是${armName[b]}；先解除接管，再按计划接管${armName[a]}`)

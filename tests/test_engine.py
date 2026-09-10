@@ -56,9 +56,14 @@ def test_default_run_id_is_target_safe():
     assert generated.startswith("run_")
     named = safe_run_id(plan_name="右手3D-biaoding")
     assert SAFE_RUN_ID_RE.fullmatch(named)
-    assert named.startswith("3D-biaoding_")
+    assert named.startswith("右手3D-biaoding_")      # 中文保留
+    assert safe_run_id("头部标定-1") == "头部标定-1"
     with pytest.raises(ValueError):
         safe_run_id("有 空格")
+    with pytest.raises(ValueError):
+        safe_run_id("a/b")
+    with pytest.raises(ValueError):
+        safe_run_id(".hidden")
 
 
 def test_only_forward_sample_nodes_capture():
