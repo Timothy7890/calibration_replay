@@ -88,7 +88,10 @@
       </nav>
 
       <div class="plan-head">
-        <input class="title" v-model="plan.name" @change="savePlan" title="点击修改名称，回车保存">
+        <label class="title-wrap" title="点击修改计划名称，回车或失焦后自动保存">
+          <span class="pen">✎</span>
+          <input class="title" v-model="plan.name" @change="savePlan" @keyup.enter="$event.target.blur()" placeholder="计划名称">
+        </label>
         <div class="seg big" title="本计划驱动哪条手臂。已有节点的计划不能直接改臂，请用镜像生成另一侧">
           <button :class="{on: plan.arm==='left'}" @click="setArm('left')">左臂</button>
           <button :class="{on: plan.arm==='right'}" @click="setArm('right')">右臂</button>
