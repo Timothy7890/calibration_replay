@@ -209,3 +209,58 @@ def test_hand_hold_failure_is_a_preflight_fault():
         engine.start(make_plan(), "refused")
     assert engine.status()["state"] == "fault"
     assert bridge.read_sample()["q"] == [0.0] * 7     # 手臂没动
+
+
+class NoCornersAdapter(MockCaptureAdapter):
+    """8131 保存了图像但没检出棋盘格。"""
+
+    def capture(self, **kwargs):
+        result = super().capture(**kwargs)
+        result["corners_detected"] = kwargs["waypoint_id"] != "s2"
+        return result
+
+
+def _three_sample_plan():
+    plan = make_plan()
+    plan.nodes = [
+        PlanNode("home", "home", "home", [0.0] * 7),
+        PlanNode("s1", "s1", "sample", [0.10] * 7),
+        PlanNode("s2", "s2", "sample", [0.20] * 7),
+        PlanNode("s3", "s3", "sample", [0.30] * 7),
+        PlanNode("t", "t", "transit", [0.15] * 7),
+    ]
+    return plan
+
+
+def test_missing_corners_continue_keeps_sampling():
+    plan = _three_sample_plan()
+    plan.on_missing_corners = "continue"
+    adapter = NoCornersAdapter()
+    engine = ReplayEngine(MockArmBridge(), lambda _plan: adapter, sleep=lambda _s: None)
+    engine.engage()
+    engine.start(plan, "r1")
+    assert engine.wait(2.0)
+    status = engine.status()
+    assert status["state"] == "completed"
+    assert [c["waypoint_id"] for c in adapter.calls] == ["s1", "s2", "s3"]
+    assert [c["corners_detected"] for c in status["captures"]] == [True, False, True]
+    assert status["progress"]["no_corners"] == 1
+    assert "未检出棋盘格" in status["message"]
+
+
+def test_missing_corners_abort_walks_rest_of_route_without_sampling():
+    plan = _three_sample_plan()
+    plan.on_missing_corners = "abort"
+    adapter = NoCornersAdapter()
+    bridge = MockArmBridge()
+    engine = ReplayEngine(bridge, lambda _plan: adapter, sleep=lambda _s: None)
+    engine.engage()
+    engine.start(plan, "r2")
+    assert engine.wait(2.0)
+    status = engine.status()
+    assert status["state"] == "completed"
+    # s2 的图像已保存；s3 不再采样，但仍沿路径经过 s3、t 后回原点
+    assert [c["waypoint_id"] for c in adapter.calls] == ["s1", "s2"]
+    assert status["progress"]["sampling_aborted"] == "s2"
+    assert bridge.read_sample()["q"] == [0.0] * 7
+    assert "停止采样" in status["message"]

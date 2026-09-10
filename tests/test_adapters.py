@@ -218,3 +218,31 @@ def test_preflight_arm_rule_depends_on_capture_service_capability():
         wrong.capture(capture_id="c", run_id="r", waypoint_id="w", target_q_rad=[0.0] * 7,
                       stability={"stable": True}, record_dir="/d/r")
     assert len(wrong.requests) == 1
+
+
+def test_2d_missing_corners_becomes_skip_not_fault():
+    from calibration_replay.adapters import CaptureSkippedError, _CornersNotDetected
+
+    # 8131 用 409 + corners_detected=false 拒绝；重试后仍没有 → 跳过（不是故障）
+    adapter = FakeHttpAdapter(
+        {"/api/capture": [_CornersNotDetected("未检出完整棋盘格"), _CornersNotDetected("未检出完整棋盘格")]},
+    )
+    adapter.retries = 1
+    with pytest.raises(CaptureSkippedError, match="未检出完整棋盘格"):
+        adapter.capture(
+            capture_id="c1", run_id="r1", waypoint_id="n1", target_q_rad=[0.0] * 7,
+            stability={}, record_dir=None,
+        )
+    assert len(adapter.requests) == 2
+
+    # 不强制角点：8131 照样保存并返回 corners_detected=false，正常算一张
+    lax = FakeHttpAdapter(
+        {"/api/capture": {"success": True, "corners_detected": False, "arm": "right", "path": "/x/joints/0000.json"}},
+        require_corners=False,
+    )
+    result = lax.capture(
+        capture_id="c1", run_id="r1", waypoint_id="n1", target_q_rad=[0.0] * 7,
+        stability={}, record_dir=None,
+    )
+    assert result["corners_detected"] is False
+    assert lax.requests[0][2]["require_corners"] is False
