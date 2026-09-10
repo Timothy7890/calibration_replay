@@ -13,6 +13,12 @@ from .models import ARMS, joint_names_for
 
 _PACKAGE_NAME = "_calibration_replay_h2_backend"
 
+# 接管时的 PD 刚度，取 IK_replay reach_server 的默认值（--arm-kp 140 --arm-kd 3.0，腕 50/2.0）
+ARM_KP = 140.0
+ARM_KD = 3.0
+ARM_KP_WRIST = 50.0
+ARM_KD_WRIST = 2.0
+
 
 def _load_backend(project: str | Path):
     root = Path(project).expanduser().resolve()
@@ -216,6 +222,11 @@ class H2ArmBridge:
                 arm=self.arm,
                 network_interface=self.network_interface,
                 max_speed_rad_s=0.30,
+                # 与 IK_replay reach 服务一致的刚度（默认 80/1.5 偏软，起停晃动、下垂大）
+                kp=ARM_KP,
+                kd=ARM_KD,
+                kp_wrist=ARM_KP_WRIST,
+                kd_wrist=ARM_KD_WRIST,
                 hand_move_kd=2.0,
                 grav_alpha=1.0,
                 payload_kg=0.0,

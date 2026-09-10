@@ -264,3 +264,35 @@ def test_missing_corners_abort_walks_rest_of_route_without_sampling():
     assert status["progress"]["sampling_aborted"] == "s2"
     assert bridge.read_sample()["q"] == [0.0] * 7
     assert "停止采样" in status["message"]
+
+
+class SaggingBridge(MockArmBridge):
+    """实测角比指令角"下垂"一点（有限 kp + 重力），并记录下发的轨迹。"""
+
+    SAG = 0.05
+
+    def __init__(self):
+        super().__init__()
+        self.sent = []
+
+    def set_target(self, q):
+        self.sent.append(list(q))
+        return super().set_target(q)
+
+    def read_sample(self):
+        sample = super().read_sample()
+        sample["cmd_rad"] = list(sample["q"])
+        sample["q"] = [v - self.SAG for v in sample["q"]]
+        return sample
+
+
+def test_move_starts_from_last_command_not_measured():
+    bridge = SaggingBridge()
+    engine = ReplayEngine(bridge, lambda _plan: MockCaptureAdapter(), sleep=lambda _seconds: None)
+    engine.engage()
+    engine.start(make_plan(), "sag")
+    assert engine.wait(2.0)
+    assert engine.status()["state"] == "completed"
+    # 每段第一帧都等于上一条指令角，绝不会被拉回到下垂的实测角
+    assert all(min(frame) >= 0.0 for frame in bridge.sent)
+    assert bridge.sent[0] == [0.0] * 7

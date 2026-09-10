@@ -248,7 +248,10 @@ class ReplayEngine:
         return run_id
 
     def _move(self, target: list[float], plan: Plan) -> None:
-        start = self.bridge.read_sample()["q"]
+        # 轨迹起点锚定在控制器"上一条指令角"而不是实测角：kp 有限 + 重力时实测角总
+        # 比指令角下垂一点，若从实测角起步，每段开头都会先把指令往回拉一下（手臂抽一下）。
+        sample = self.bridge.read_sample()
+        start = sample.get("cmd_rad") or sample["q"]
         duration = segment_duration(
             start,
             target,
