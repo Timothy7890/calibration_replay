@@ -63,6 +63,15 @@ table.nodes input.editable:hover{border-color:var(--accent,#5b9cf6);background:#
 table.nodes input.editable:focus{border-style:solid;border-color:var(--accent,#5b9cf6);background:#0e1319;outline:none}
 select.role-home{color:#9fd0ff}select.role-sample{color:#7fe0b0}select.role-transit{color:var(--muted)}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.cam{display:grid;grid-template-columns:minmax(0,2fr) minmax(220px,1fr);gap:16px;margin:10px 0 14px}
+.cam-view{position:relative;background:#0b0f14;border:1px solid var(--line);border-radius:8px;aspect-ratio:16/9;overflow:hidden}
+.cam-view img{width:100%;height:100%;object-fit:contain;display:block}
+.cam-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#8a97a8;font-size:13px;text-align:center;padding:12px}
+.cam-badges{position:absolute;left:8px;bottom:8px;display:flex;gap:6px}
+.cam-badges .tag{background:rgba(20,26,34,.85)}
+.cam-depth{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none}
+.depth-legend{display:inline-block;width:70px;height:8px;vertical-align:middle;border-radius:4px;background:linear-gradient(90deg,#7a0403,#f9fb0e,#1ae4b6,#30123b)}
+@media (max-width:900px){.cam{grid-template-columns:1fr}}
 table.joints td{padding:2px 8px}
 .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 ul.errors{margin:6px 0 0;padding-left:20px;color:var(--bad)}

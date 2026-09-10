@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import urllib.error
 import urllib.request
 
 from contextlib import asynccontextmanager
@@ -206,6 +207,30 @@ def create_app(
                 return json.loads(resp.read().decode("utf-8"))
         except Exception as exc:  # noqa: BLE001 - 8131 没起来也要能回答
             return {"available": False, "devices": [], "current_serial": None, "last_error": f"8131 不可达: {exc}"}
+
+    @app.post("/api/cameras/2d/select")
+    def cameras_2d_select(body: dict):
+        """让 8131 切到指定相机（录点时取景用；运行前预检仍会按计划的序列号再校验一次）。"""
+        serial = str((body or {}).get("serial") or "").strip()
+        if not serial:
+            raise HTTPException(422, "缺少 serial")
+        url = config.base_url_2d.rstrip("/") + "/api/camera/select"
+        data = json.dumps({"serial": serial}).encode("utf-8")
+        request = urllib.request.Request(url, data=data, method="POST",
+                                         headers={"Content-Type": "application/json", "Accept": "application/json"})
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        try:
+            with opener.open(request, timeout=30) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            try:
+                message = json.loads(detail).get("error") or detail
+            except ValueError:
+                message = detail
+            raise HTTPException(409, f"切换相机失败: {message}") from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(502, f"8131 不可达: {exc}") from exc
 
     @app.get("/api/status")
     def status():

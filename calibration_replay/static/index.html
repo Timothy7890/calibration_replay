@@ -165,6 +165,52 @@
           <button class="danger" @click="act('disarm')" :disabled="!arm.engaged || running">解除接管（先扶住手臂）</button>
           <button class="danger" @click="act('stop')" title="急停：冻结在当前位置并刚性保持">■ 急停</button>
         </div>
+        <!-- 3D：8132 实时 RGB + SDK 对齐深度伪彩叠加（标记板要落在有效深度范围 0.3~2 m 内） -->
+        <div class="cam" v-if="plan.target === 'hand_eye_3D'">
+          <div class="cam-view">
+            <img v-if="cam3d.base" v-show="cam3d.online" :src="cam3d.base + '/api/frame.jpg?v=' + cam3d.v" alt="" @load="cam3dLoaded" @error="cam3dFailed">
+            <img v-if="cam3d.base && cam3d.showDepth && cam3d.online" class="cam-depth" :src="cam3d.base + '/api/depth-overlay.png?v=' + cam3d.v" :style="{ opacity: cam3d.opacity / 100 }" alt="深度叠加">
+            <div v-if="!cam3d.online" class="cam-empty">{{ cam3d.base ? '正在连接 8132 画面…（8132 未启动或相机未连接）' : '计划没有采集服务 URL' }}</div>
+            <div class="cam-badges">
+              <span class="tag" :class="cam3d.online ? 'ok' : 'warn'">{{ cam3d.online ? '画面在线' : '画面离线' }}</span>
+              <span class="tag" v-if="cam3d.showDepth && cam3d.online">深度叠加 {{ cam3d.opacity }}%</span>
+            </div>
+          </div>
+          <div class="cam-side">
+            <h3>相机取景（3D）</h3>
+            <p class="muted small">深度伪彩只在 0.3～2 m 有效范围内着色（近 <span class="depth-legend"></span> 远），标记板要落在有颜色的区域里再录采样点；没颜色说明太近、太远或反光。过渡点不要求。</p>
+            <label class="inline"><input type="checkbox" v-model="cam3d.showDepth"> 叠加实时 SDK 对齐深度</label>
+            <div class="toolbar" style="margin-top:6px">
+              <input type="range" min="10" max="90" step="5" v-model.number="cam3d.opacity" :disabled="!cam3d.showDepth" style="width:140px">
+              <span class="muted small">{{ cam3d.opacity }}%</span>
+            </div>
+            <p class="muted small" style="margin-top:8px">画面来自 8132（{{ plan.base_url }}）。</p>
+          </div>
+        </div>
+        <!-- 2D：8131 实时画面 + 棋盘格角点叠加，录点时当取景器 -->
+        <div class="cam" v-if="plan.target !== 'hand_eye_3D'">
+          <div class="cam-view">
+            <img v-if="cam.src" :src="cam.src" alt="相机画面">
+            <div v-else class="cam-empty">{{ cam.connected ? '等待相机帧（8131 未连接相机或未选择序列号）' : '正在连接 8131 画面…' }}</div>
+            <div class="cam-badges">
+              <span class="tag" :class="cam.detected ? 'ok' : 'warn'">{{ cam.detected ? '已检出棋盘格 ✓' : '未检出棋盘格' }}</span>
+              <span class="tag">{{ cam.connected ? '画面在线' : '画面离线' }}</span>
+              <span class="tag mono" v-if="cameras2d.current_serial">{{ cameras2d.current_serial }}</span>
+            </div>
+          </div>
+          <div class="cam-side">
+            <h3>相机取景（2D）</h3>
+            <p class="muted small">把手臂拖到棋盘格完整进入画面、右上角显示「已检出棋盘格」的位置再录采样点。过渡点不要求看到棋盘。</p>
+            <label>棋盘格内角点 列x行</label>
+            <input v-model="cam.boardSize" @change="camSend({ board_size: cam.boardSize })" placeholder="11x8" style="width:90px">
+            <label class="inline" style="margin-top:8px"><input type="checkbox" v-model="cam.showCorners" @change="camSend({ show_corners: cam.showCorners })"> 叠加角点</label>
+            <div v-if="plan.camera_serial && cameras2d.current_serial && cameras2d.current_serial !== plan.camera_serial" class="hint" style="margin-top:8px">
+              画面是 <span class="mono">{{ cameras2d.current_serial }}</span>，而本计划指定 <span class="mono">{{ plan.camera_serial }}</span>。
+              <button @click="switchCamera2d(plan.camera_serial)">切到本计划相机</button>
+            </div>
+            <p class="muted small" style="margin-top:8px">画面来自 8131（{{ plan.base_url }}）当前选中的相机；换相机在下方「高级参数 → 2D 相机序列号」（选择后会同时切换画面）。</p>
+          </div>
+        </div>
         <div class="two">
           <div>
             <h3>{{ armName[joints.arm || plan.arm] }}实测关节</h3>
@@ -275,7 +321,7 @@
           <div><label>采集服务 URL</label><input v-model="plan.base_url"></div>
           <div v-if="plan.target !== 'hand_eye_3D'">
             <label>2D 相机序列号 <a href="#" class="small" @click.prevent="loadCameras2d">刷新</a></label>
-            <select v-model="plan.camera_serial" @change="savePlan">
+            <select v-model="plan.camera_serial" @change="savePlan(); plan.camera_serial && switchCamera2d(plan.camera_serial)">
               <option :value="null">不指定（用 8131 当前相机）</option>
               <option v-for="d in cameras2d.devices" :key="d.serial" :value="d.serial" :disabled="d.busy">
                 {{ d.serial }} · {{ d.name }}{{ d.current ? ' · 当前画面' : '' }}{{ d.busy ? ' · 被占用' : '' }}

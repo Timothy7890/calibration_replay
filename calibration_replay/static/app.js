@@ -1,7 +1,7 @@
 /* H2 标定轨迹复现 —— Vue 3 前端（本地 vendor，无 CDN、无构建步骤） */
 import { createViewer } from "/static/viewer.js";
 
-const { createApp, ref, reactive, computed, onMounted, nextTick } = Vue;
+const { createApp, ref, reactive, computed, onMounted, nextTick, watch } = Vue;
 
 const stateName = {
   idle: "空闲", preflight: "预检中", armed: "已接管", moving: "前向运动", settling: "稳定确认",
@@ -79,6 +79,68 @@ createApp({
     const import3dDir = ref("/home/robot/yx/project/calib/hand_eye_3D/teleop_data/biaoding/right");
     const import3dResult = ref("");
     const cameras2d = ref({ devices: [], current_serial: null, last_error: "" });
+
+    const switchCamera2d = (serial) => guard(async () => {
+      await post("/api/cameras/2d/select", { serial });
+      await loadCameras2d();
+      say(`已切到相机 ${serial}`);
+    });
+
+    // ---------- 8132 实时画面 + 深度叠加（3D 计划录点用的取景器） ----------
+    const cam3d = reactive({ base: "", v: Date.now(), online: false, showDepth: true, opacity: 55 });
+    let cam3dTimer = null;
+    const cam3dTick = (delay) => { clearTimeout(cam3dTimer); cam3dTimer = setTimeout(() => { cam3d.v = Date.now(); }, delay); };
+    const cam3dLoaded = () => { cam3d.online = true; cam3dTick(160); };
+    const cam3dFailed = () => { cam3d.online = false; cam3dTick(800); };
+    const publicBase = (baseUrl) => {
+      // 计划里的 http://127.0.0.1:8132 → 浏览器能访问的 http://<本页主机>:8132
+      try {
+        const u = new URL(baseUrl);
+        const host = ["127.0.0.1", "localhost", "0.0.0.0"].includes(u.hostname) ? location.hostname : u.hostname;
+        return `${u.protocol}//${host}${u.port ? ":" + u.port : ""}`;
+      } catch { return ""; }
+    };
+
+    // ---------- 8131 实时画面（2D 计划录点用的取景器） ----------
+    const cam = reactive({ src: "", detected: false, connected: false, boardSize: "11x8", showCorners: true });
+    let camWs = null, camRetry = null, camUrl = "";
+    const camSend = (msg) => { if (camWs && camWs.readyState === 1) camWs.send(JSON.stringify(msg)); };
+    const camClose = () => {
+      clearTimeout(camRetry); camRetry = null;
+      if (camWs) { camWs.onclose = null; camWs.onerror = null; camWs.close(); camWs = null; }
+      cam.connected = false; cam.src = ""; cam.detected = false;
+    };
+    const camConnect = () => {
+      camClose();
+      if (!camUrl) return;
+      try { camWs = new WebSocket(camUrl); } catch { camRetry = setTimeout(camConnect, 2000); return; }
+      camWs.onopen = () => { cam.connected = true; camSend({ board_size: cam.boardSize, show_corners: cam.showCorners }); };
+      camWs.onmessage = (ev) => {
+        try {
+          const d = JSON.parse(ev.data);
+          if (d.left) cam.src = "data:image/jpeg;base64," + d.left;
+          cam.detected = !!d.left_detected;
+        } catch { /* ignore */ }
+      };
+      camWs.onclose = () => { cam.connected = false; camRetry = setTimeout(camConnect, 2000); };
+      camWs.onerror = () => { cam.connected = false; };
+    };
+    // 计划的 base_url（如 http://127.0.0.1:8131）→ 浏览器能访问的 ws://<本页主机>:8131/ws/stream
+    watch(() => [plan.value?.id, plan.value?.target, plan.value?.base_url], () => {
+      const p = plan.value;
+      // 3D：切换轮询目标
+      const base3d = p && p.target === "hand_eye_3D" && p.base_url ? publicBase(p.base_url) : "";
+      if (base3d !== cam3d.base) { cam3d.base = base3d; cam3d.online = false; clearTimeout(cam3dTimer); cam3d.v = Date.now(); }
+      let url = "";
+      if (p && p.target !== "hand_eye_3D" && p.base_url) {
+        try {
+          const u = new URL(p.base_url);
+          const host = ["127.0.0.1", "localhost", "0.0.0.0"].includes(u.hostname) ? location.hostname : u.hostname;
+          url = `${location.protocol === "https:" ? "wss" : "ws"}://${host}:${u.port || 80}/ws/stream`;
+        } catch { url = ""; }
+      }
+      if (url !== camUrl) { camUrl = url; camConnect(); }
+    });
     const loadCameras2d = async () => {
       try { cameras2d.value = await api("/api/cameras/2d"); } catch (e) { cameras2d.value = { devices: [], last_error: e.message }; }
     };
@@ -432,7 +494,7 @@ createApp({
     return {
       stateName, targetName, armName, otherArm, plans, plan, status, online, joints, validation, exportResult, toast,
       capability, newArm, mirrorPlan, setArm,
-      newName, newTarget, import3dDir, import3dResult, import2dDir, import2dTarget, cameras2d, loadCameras2d, nodeName, manualQ, manualRole, exportDir, runId,
+      newName, newTarget, import3dDir, import3dResult, import2dDir, import2dTarget, cameras2d, loadCameras2d, switchCamera2d, cam, camSend, cam3d, cam3dLoaded, cam3dFailed, nodeName, manualQ, manualRole, exportDir, runId,
       arm, running, home, homeDelta, deltas, gaps, steps, logText,
       fmt, fmtQ, parseQ, shortJoint, summarize,
       loadPlans, loadPlan, savePlan, createPlan, deletePlan, import3D, import2D, importDefaults,
