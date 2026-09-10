@@ -6,6 +6,9 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+# 采集端都在本机/局域网，绝不走 http_proxy（终端里常设了代理，会把 127.0.0.1 请求发到代理机）
+_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 
 class NonRetryableCaptureError(RuntimeError):
     """Retrying would only repeat the damage (e.g. more misplaced episodes)."""
@@ -62,7 +65,7 @@ class HttpCaptureAdapter(CaptureAdapter):
             headers={"Accept": "application/json", "Content-Type": "application/json"},
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
+            with _OPENER.open(request, timeout=self.timeout_s) as response:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")

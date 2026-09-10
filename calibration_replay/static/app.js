@@ -78,6 +78,12 @@ createApp({
     const newTarget = ref("hand_eye_3D");
     const import3dDir = ref("/home/robot/yx/project/calib/hand_eye_3D/teleop_data/biaoding/right");
     const import3dResult = ref("");
+    const cameras2d = ref({ devices: [], current_serial: null, last_error: "" });
+    const loadCameras2d = async () => {
+      try { cameras2d.value = await api("/api/cameras/2d"); } catch (e) { cameras2d.value = { devices: [], last_error: e.message }; }
+    };
+    const import2dDir = ref("");
+    const import2dTarget = ref("hand_eye_2D_head");
     const nodeName = ref("");
     const autoPlace = ref(true);   // 录制/添加的新节点自动放到绕路最小的位置
     const manualQ = ref("");
@@ -216,6 +222,16 @@ createApp({
       });
       await loadPlans(p.id);
       say(`已导入 ${p.nodes.length} 个 episode。下一步：补过渡点、接管手臂、录原点。`, "ok", 6000);
+    });
+    const import2D = () => guard(async () => {
+      if (!import2dDir.value.trim()) { say("请填写 2D 会话目录", "warn"); return; }
+      const p = await post("/api/import/session", {
+        target: import2dTarget.value, session_dir: import2dDir.value.trim(),
+        name: newName.value || ("Imported 2D " + (import2dTarget.value.endsWith("head") ? "head" : "waist")),
+      });
+      await loadPlans(p.id);
+      const samples = p.nodes.filter((n) => n.role === "sample").length;
+      say(`已导入 ${samples} 个采样点 + ${p.nodes.length - samples} 个过渡点（${p.arm === "left" ? "左" : "右"}臂）。下一步：录原点、校验。`, "ok", 6000);
     });
     const importDefaults = () => guard(async () => {
       const d = await post("/api/import/default-sessions");
@@ -407,7 +423,7 @@ createApp({
         await loadPlans(params.get("plan") || undefined);
         if (params.get("preview") && plan.value) await loadPreview();
       });
-      refreshStatus(); refreshJoints(); refreshCapability();
+      refreshStatus(); refreshJoints(); refreshCapability(); loadCameras2d();
       setInterval(refreshStatus, 500);
       setInterval(refreshCapability, 5000);
       setInterval(refreshJoints, 250);
@@ -416,10 +432,10 @@ createApp({
     return {
       stateName, targetName, armName, otherArm, plans, plan, status, online, joints, validation, exportResult, toast,
       capability, newArm, mirrorPlan, setArm,
-      newName, newTarget, import3dDir, import3dResult, nodeName, manualQ, manualRole, exportDir, runId,
+      newName, newTarget, import3dDir, import3dResult, import2dDir, import2dTarget, cameras2d, loadCameras2d, nodeName, manualQ, manualRole, exportDir, runId,
       arm, running, home, homeDelta, deltas, gaps, steps, logText,
       fmt, fmtQ, parseQ, shortJoint, summarize,
-      loadPlans, loadPlan, savePlan, createPlan, deletePlan, import3D, importDefaults,
+      loadPlans, loadPlan, savePlan, createPlan, deletePlan, import3D, import2D, importDefaults,
       nodeEdit, moveNode, removeNode, recordNode, manualNode, autoInsertTransits, returnDelta, autoPlace, autoplaceNode,
       editShown, editStart, editInput, editCancel, editCommit,
       validatePlan, exportPlan, act, run,

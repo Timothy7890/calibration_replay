@@ -42,6 +42,11 @@ def import_session(
     )
     inliers = {int(value) for value in result.get("inlier_indices", [])}
     plan = Plan.create(name=name, target=target, base_url=base_url)
+    session_arm = str(session_meta.get("arm") or "").strip()
+    if session_arm:
+        if session_arm not in ARMS:
+            raise ValueError(f"{root} session_meta.json 的 arm={session_arm!r} 不是 left/right")
+        plan.arm = session_arm
     camera_serial = (session_meta.get("camera") or {}).get("serial")
     plan.camera_serial = str(camera_serial).strip() if camera_serial else None
     plan.require_corners = True

@@ -66,9 +66,14 @@
         <button class="full" @click="createPlan">新建</button>
       </details>
       <details class="box">
-        <summary>导入指定 2D 会话</summary>
-        <p class="muted small">导入 hand_eye_2D 头/腰两个已解算会话的内点姿态。</p>
-        <button class="full" @click="importDefaults">导入 2D 会话</button>
+        <summary>从 2D 采集会话导入（hand_eye_2D 的 handeye_data）</summary>
+        <p class="muted small">会话目录需含 joints/ 与 handeye_result_left.json；手臂按 session_meta.json 识别。求解内点作采样点，被剔除的作过渡点。</p>
+        <label>计划名称</label><input v-model="newName">
+        <label>会话目录</label><input v-model="import2dDir" placeholder="/home/robot/yx/project/calib/hand_eye_2D/handeye_data/2026…">
+        <label>相机位置</label>
+        <div class="seg"><button :class="{on: import2dTarget==='hand_eye_2D_head'}" @click="import2dTarget='hand_eye_2D_head'">头部</button><button :class="{on: import2dTarget==='hand_eye_2D_waist'}" @click="import2dTarget='hand_eye_2D_waist'">腰部</button></div>
+        <button class="primary full" @click="import2D">导入为新计划</button>
+        <p class="muted small" style="margin-top:8px">或一键导入内置的 2026-09-02 头/腰两个示例会话：<a href="#" @click.prevent="importDefaults">导入示例会话</a></p>
       </details>
     </aside>
 
@@ -268,7 +273,19 @@
         <div class="grid3">
           <div><label>采集目标</label><select v-model="plan.target"><option v-for="(n,k) in targetName" :value="k">{{ n }}</option></select></div>
           <div><label>采集服务 URL</label><input v-model="plan.base_url"></div>
-          <div><label>2D 相机序列号</label><input v-model="plan.camera_serial" placeholder="仅 2D"></div>
+          <div v-if="plan.target !== 'hand_eye_3D'">
+            <label>2D 相机序列号 <a href="#" class="small" @click.prevent="loadCameras2d">刷新</a></label>
+            <select v-model="plan.camera_serial" @change="savePlan">
+              <option :value="null">不指定（用 8131 当前相机）</option>
+              <option v-for="d in cameras2d.devices" :key="d.serial" :value="d.serial" :disabled="d.busy">
+                {{ d.serial }} · {{ d.name }}{{ d.current ? ' · 当前画面' : '' }}{{ d.busy ? ' · 被占用' : '' }}
+              </option>
+              <option v-if="plan.camera_serial && !cameras2d.devices.some(d => d.serial === plan.camera_serial)" :value="plan.camera_serial">
+                {{ plan.camera_serial }} · 当前不在线（预检会失败）
+              </option>
+            </select>
+            <p class="muted small" v-if="cameras2d.last_error && !cameras2d.devices.length">{{ cameras2d.last_error }}</p>
+          </div>
         </div>
         <label class="inline"><input type="checkbox" v-model="plan.require_corners"> 2D 拍摄必须确认完整棋盘格角点</label>
         <h3>运动</h3>

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import urllib.request
+
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,8 +17,6 @@ from .bridge import H2ArmBridge, MockArmBridge, read_urdf_limits
 from .engine import ReplayEngine
 from .exporter import build_route_trajectory, export_ik_replay
 from .importer import import_3d_task, import_session, seed_default_imports
-import json
-import urllib.request
 
 from .models import (
     ARM_LABELS, ARMS, Plan, PlanNode, best_insert_index, mirror_plan, validate_plan, validate_q,
@@ -194,6 +195,17 @@ def create_app(
             [node for node in plan.nodes if node.enabled and node.role == "home"]
         ) != 1
         return store.save(plan)
+
+    @app.get("/api/cameras/2d")
+    def cameras_2d():
+        """代理 8131 的相机枚举，给计划页的「2D 相机序列号」下拉用。"""
+        url = config.base_url_2d.rstrip("/") + "/api/camera/devices"
+        try:
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            with opener.open(urllib.request.Request(url, headers={"Accept": "application/json"}), timeout=15) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception as exc:  # noqa: BLE001 - 8131 没起来也要能回答
+            return {"available": False, "devices": [], "current_serial": None, "last_error": f"8131 不可达: {exc}"}
 
     @app.get("/api/status")
     def status():
