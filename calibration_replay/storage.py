@@ -102,6 +102,8 @@ class PlanStore:
                     "run_id": payload.get("run_id", path.parent.name),
                     "arm": path.parent.parent.name,
                     "plan_name": (payload.get("plan") or {}).get("name"),
+                    "target": (payload.get("plan") or {}).get("target"),
+                    "camera_serial": (payload.get("plan") or {}).get("camera_serial"),
                     "outcome": payload.get("outcome"),
                     "started_at": payload.get("started_at"),
                     "finished_at": payload.get("finished_at"),

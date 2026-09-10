@@ -220,7 +220,7 @@ class ReplayEngine:
             self._set_state("preflight", "正在检查采集服务、会话和手臂控制权。")
         try:
             adapter = self.adapter_factory(plan)
-            preflight = adapter.preflight(run_id)
+            preflight = adapter.preflight(run_id, record_dir=run_dir)
         except Exception as exc:
             self._set_state("fault", f"预检拒绝运行：{exc}")
             raise RuntimeError(f"preflight failed: {exc}") from exc

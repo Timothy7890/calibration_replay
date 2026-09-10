@@ -44,6 +44,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="No DDS, no physical motion, and no capture-service network calls",
     )
+    parser.add_argument(
+        "--mock-capture-http",
+        action="store_true",
+        help="With --mock: still call the 2D/3D capture service over HTTP "
+        "(start it in its own mock mode) for a full-stack rehearsal",
+    )
     return parser
 
 
@@ -54,6 +60,7 @@ def main() -> None:
         h2_project=args.hand_eye_3d_project,
         network_interface=args.network_interface,
         mock=args.mock,
+        mock_capture_http=args.mock_capture_http,
         base_url_2d=args.base_url_2d,
         base_url_3d=args.base_url_3d,
         robot_mesh_dir=args.robot_mesh_dir,

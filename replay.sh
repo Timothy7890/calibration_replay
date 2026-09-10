@@ -48,8 +48,16 @@ owned_pid() {
 }
 
 capture_arm_control_enabled() {
-    curl -sf --max-time 2 "$BASE_URL_3D/api/arm/status" 2>/dev/null |
-        grep -Eq '"(enabled|armed|publishing)": *true'
+    # 8132（3D）与 8131（2D）任一开启了手臂控制都会和本服务抢 rt/arm_sdk
+    local url
+    for url in "$BASE_URL_3D" "$BASE_URL_2D"; do
+        if curl -sf --max-time 2 "$url/api/arm/status" 2>/dev/null |
+            grep -Eq '"(enabled|armed|publishing|available)": *true'; then
+            CONFLICT_URL="$url"
+            return 0
+        fi
+    done
+    return 1
 }
 
 do_status() {
@@ -93,12 +101,18 @@ do_start() {
     if [[ "${1:-}" == "--mock" ]]; then
         mode_args=(--mock)
         mode="mock 联调（无硬件）"
+        # --mock --capture-http：采集仍走 HTTP（对方也 mock），全链路联调
+        if [[ "${2:-}" == "--capture-http" ]]; then
+            mode_args+=(--mock-capture-http)
+            mode="mock 联调（无硬件，采集走 HTTP）"
+        fi
     else
         mode_args=(--network-interface "$NETWORK_INTERFACE"
                    --hand-eye-3d-project "$HAND_EYE_3D_PROJECT")
+        CONFLICT_URL=""
         if capture_arm_control_enabled; then
-            echo "[回放] 8132 采集端启用了手臂控制，会和本服务抢 rt/arm_sdk。" >&2
-            echo "       请先用 hand_eye_3D/start.sh --no-arm 重启采集端。" >&2
+            echo "[回放] 采集端 $CONFLICT_URL 启用了手臂控制，会和本服务抢 rt/arm_sdk。" >&2
+            echo "       请不带 --arm-control 重启采集端（3D: hand_eye_3D/start.sh --no-arm）。" >&2
             return 1
         fi
     fi
@@ -134,6 +148,6 @@ case "${1:-start}" in
     status) do_status ;;
     log)    exec tail -f "$LOG_FILE" ;;
     *)
-        echo "用法: $0 [start [--mock]|status|stop|log]"
+        echo "用法: $0 [start [--mock [--capture-http]]|status|stop|log]"
         exit 1 ;;
 esac

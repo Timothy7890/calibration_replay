@@ -12,7 +12,7 @@ class NonRetryableCaptureError(RuntimeError):
 
 
 class CaptureAdapter:
-    def preflight(self, run_id: str) -> dict[str, Any]:
+    def preflight(self, run_id: str, record_dir: str | None = None) -> dict[str, Any]:
         raise NotImplementedError
 
     def capture(
@@ -103,7 +103,7 @@ class HttpCaptureAdapter(CaptureAdapter):
             # 收尾尽力而为；保持线程在 8132 里，下次 start 会幂等复用或报占用
             pass
 
-    def preflight(self, run_id: str) -> dict[str, Any]:
+    def preflight(self, run_id: str, record_dir: str | None = None) -> dict[str, Any]:
         health = self._request("GET", "/api/status")
         arm = self._request("GET", "/api/arm/status")
         dangerous = any(
@@ -134,10 +134,13 @@ class HttpCaptureAdapter(CaptureAdapter):
             )
         result = {"ok": True, "health": health, "arm": arm}
         if self.target.startswith("hand_eye_2D"):
+            # 会话直接落到本次运行的目录（runs/<arm>/<run_id>/），与 3D 的 record_dir 同义；
+            # 8131 按请求切臂，返回的 arm 必须与计划一致。
+            session_body: dict[str, Any] = {"run_id": run_id, "arm": self.arm}
+            if record_dir:
+                session_body["record_dir"] = record_dir
             try:
-                session = self._request(
-                    "POST", "/api/session/start", {"run_id": run_id}
-                )
+                session = self._request("POST", "/api/session/start", session_body)
                 if not self._response_ok(session):
                     raise RuntimeError(
                         str(session.get("error", "2D session start rejected"))
@@ -156,8 +159,21 @@ class HttpCaptureAdapter(CaptureAdapter):
                     "success": True,
                     "run_id": run_id,
                     "count": 0,
+                    "arm": current.get("arm"),
+                    "save_path": current.get("save_path"),
                     "verified_after_uncertain_response": True,
                 }
+            if session.get("arm") not in (None, self.arm):
+                raise RuntimeError(
+                    f"2D capture service is recording the {session.get('arm')} arm but this "
+                    f"plan is for the {self.arm} arm"
+                )
+            if record_dir and session.get("save_path") not in (None, record_dir.rstrip("/")):
+                # 旧版 8131 忽略 record_dir 会写进自己的目录：宁可失败也不能让数据混进去
+                raise RuntimeError(
+                    f"2D capture service ignored record_dir and will write to "
+                    f"{session.get('save_path')}; restart the hand_eye_2D backend (8131)"
+                )
             result["session"] = session
 
             if self.camera_serial:
@@ -223,6 +239,7 @@ class HttpCaptureAdapter(CaptureAdapter):
         else:
             path = "/api/capture"
             body["require_corners"] = self.require_corners
+            body["arm"] = self.arm
         last_error: Exception | None = None
         for attempt in range(self.retries + 1):
             try:
@@ -236,19 +253,20 @@ class HttpCaptureAdapter(CaptureAdapter):
                     and result.get("corners_detected") is False
                 ):
                     raise RuntimeError("capture rejected: chessboard corners not detected")
-                if self.target == "hand_eye_3D" and result.get("arm") not in (None, self.arm):
+                if result.get("arm") not in (None, self.arm):
                     raise NonRetryableCaptureError(
                         f"capture service recorded the {result.get('arm')} arm instead of "
-                        f"{self.arm}; restart the hand_eye_3D backend (8132) with --arm {self.arm}"
+                        f"{self.arm}; restart the capture backend with --arm {self.arm}"
                     )
-                if record_dir and self.target == "hand_eye_3D":
-                    path = str(result.get("path") or "")
-                    if not path.startswith(record_dir.rstrip("/") + "/"):
-                        # 旧版 8132 会忽略 record_dir 并写进默认目录：宁可失败也不能让数据混进去
+                if record_dir:
+                    # 3D 的 episode 目录 / 2D 的 joints/NNNN.json 都必须落在本次运行目录里；
+                    # 旧版后端会忽略 record_dir 并写进默认目录：宁可失败也不能让数据混进去
+                    written = str(result.get("path") or "")
+                    if not written.startswith(record_dir.rstrip("/") + "/"):
                         raise NonRetryableCaptureError(
                             "capture service ignored record_dir and wrote to "
-                            f"{path or '?'}; restart the hand_eye_3D backend (8132) "
-                            "so episodes land in the run directory"
+                            f"{written or '?'}; restart the capture backend "
+                            "so data lands in the run directory"
                         )
                 return result
             except NonRetryableCaptureError:
@@ -273,12 +291,13 @@ class MockCaptureAdapter(CaptureAdapter):
     def end_hand_hold(self) -> None:
         self.hand_hold_calls.append(("stop", None))
 
-    def preflight(self, run_id: str) -> dict[str, Any]:
+    def preflight(self, run_id: str, record_dir: str | None = None) -> dict[str, Any]:
         self.preflight_calls.append(run_id)
         return {
             "ok": True,
             "mock": True,
             "run_id": run_id,
+            "record_dir": record_dir,
             "arm": {"enabled": False},
         }
 

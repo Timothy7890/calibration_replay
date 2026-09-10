@@ -215,8 +215,13 @@ that already exists for that arm is refused): for
 `POST /api/record/episode`, so the 8132 capture service writes
 `episode_0000…` there instead of its default `--record-task-dir`, and
 `run.json` (plan snapshot, certificates, capture results) is written beside
-them when the run ends. `GET /api/runs` lists the runs. 2D captures stay in the
-8131 session directory. Point the hand_eye_3D solver at a run directory with
+them when the run ends. `GET /api/runs` lists the runs. For `hand_eye_2D_*`
+the same directory is passed as `record_dir` to `POST /api/session/start`
+together with the plan's `arm`, so 8131 writes `left/`, `right/`, `joints/`,
+`session_meta.json` and `camera_intrinsics.json` there; preflight refuses to
+run when 8131 echoes a different `arm` or `save_path` (legacy backend). Solve
+that session with 8131 `POST /api/solve {"session": "<absolute run dir>"}`.
+Point the hand_eye_3D solver at a run directory with
 `--teleop-task-dir <data-root>/runs/<arm>/<run_id>` (or import it from the 7012 page).
 The local operator UI is Chinese and exposes both the run name and the per-plan
 2D camera serial.

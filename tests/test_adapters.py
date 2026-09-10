@@ -43,7 +43,10 @@ def test_2d_preflight_order_and_exact_capture_body():
                 },
             ],
             "/api/arm/status": {"available": False, "engaged": False},
-            "/api/session/start": {"success": True, "run_id": "batch-01", "count": 0},
+            "/api/session/start": {
+                "success": True, "run_id": "batch-01", "count": 0,
+                "arm": "right", "save_path": "/data/runs/right/batch-01",
+            },
             "/api/camera/select": {
                 "success": True,
                 "camera": {"serial": "CAM-22"},
@@ -57,7 +60,7 @@ def test_2d_preflight_order_and_exact_capture_body():
         },
         camera_serial="CAM-22",
     )
-    preflight = adapter.preflight("batch-01")
+    preflight = adapter.preflight("batch-01", record_dir="/data/runs/right/batch-01")
     assert preflight["detection"]["found"] is False
     assert [(method, path) for method, path, _ in adapter.requests] == [
         ("GET", "/api/status"),
@@ -67,16 +70,22 @@ def test_2d_preflight_order_and_exact_capture_body():
         ("GET", "/api/status"),
         ("POST", "/api/checkerboard/detect"),
     ]
-    assert adapter.requests[2][2] == {"run_id": "batch-01"}
+    assert adapter.requests[2][2] == {
+        "run_id": "batch-01", "arm": "right", "record_dir": "/data/runs/right/batch-01",
+    }
     assert adapter.requests[3][2] == {"serial": "CAM-22"}
 
-    adapter = FakeHttpAdapter({"/api/capture": {"success": True, "index": 4}})
+    adapter = FakeHttpAdapter(
+        {"/api/capture": {"success": True, "index": 4, "arm": "right",
+                          "path": "/data/runs/right/batch-01/joints/0004.json"}}
+    )
     result = adapter.capture(
         capture_id="stable-id",
         run_id="batch-01",
         waypoint_id="sample",
         target_q_rad=[0.1] * 7,
         stability={"stable": True},
+        record_dir="/data/runs/right/batch-01",
     )
     assert result["index"] == 4
     method, path, payload = adapter.requests[-1]
@@ -88,7 +97,45 @@ def test_2d_preflight_order_and_exact_capture_body():
         "target_q_rad": [0.1] * 7,
         "stability": {"stable": True},
         "require_corners": True,
+        "arm": "right",
     }
+
+
+def test_2d_preflight_rejects_legacy_or_wrong_arm_service():
+    """旧版 8131 没有 /api/session/start 且 /api/status 无 run_id → 预检失败；
+    返回的 arm / save_path 与计划不符 → 失败，绝不把数据混进别的目录。"""
+    legacy = FakeHttpAdapter(
+        {
+            "/api/status": [{"arm": "right", "count": 3}, {"arm": "right", "count": 3}],
+            "/api/arm/status": {"available": False, "engaged": False},
+            "/api/session/start": RuntimeError("POST /api/session/start returned HTTP 404"),
+        }
+    )
+    with pytest.raises(RuntimeError, match="HTTP 404"):
+        legacy.preflight("r1", record_dir="/data/runs/right/r1")
+
+    wrong_arm = FakeHttpAdapter(
+        {
+            "/api/status": {"arm": "right", "count": 0, "recording": {"arm_selectable": True}},
+            "/api/arm/status": {"available": False, "engaged": False},
+            "/api/session/start": {"success": True, "run_id": "r1", "count": 0, "arm": "right",
+                                   "save_path": "/data/runs/left/r1"},
+        },
+        arm="left",
+    )
+    with pytest.raises(RuntimeError, match="recording the right arm"):
+        wrong_arm.preflight("r1", record_dir="/data/runs/left/r1")
+
+    ignored_dir = FakeHttpAdapter(
+        {
+            "/api/status": {"arm": "right", "count": 0},
+            "/api/arm/status": {"available": False, "engaged": False},
+            "/api/session/start": {"success": True, "run_id": "r1", "count": 0, "arm": "right",
+                                   "save_path": "/old/handeye_data/r1"},
+        }
+    )
+    with pytest.raises(RuntimeError, match="ignored record_dir"):
+        ignored_dir.preflight("r1", record_dir="/data/runs/right/r1")
 
 
 def test_3d_exact_record_path_and_body():

@@ -29,6 +29,8 @@ class AppConfig:
     h2_project: str
     network_interface: str | None = None
     mock: bool = False
+    # --mock 时仍通过 HTTP 调采集服务（对方也以 mock 启动）：全链路联调用
+    mock_capture_http: bool = False
     base_url_2d: str = "http://127.0.0.1:8131"
     base_url_3d: str = "http://127.0.0.1:8132"
     # In-page 3D preview: URDF comes from the hand_eye_3D project, STL meshes
@@ -124,7 +126,7 @@ def create_app(
     if adapter_factory is None:
         adapter_factory = (
             (lambda _plan: MockCaptureAdapter())
-            if config.mock
+            if config.mock and not config.mock_capture_http
             else lambda plan: HttpCaptureAdapter(
                 plan.base_url,
                 plan.target,
