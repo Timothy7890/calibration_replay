@@ -152,8 +152,12 @@ key.
 
 For 2D, preflight creates/selects the empty run session first, optionally selects
 and verifies the configured camera serial, then calls
-`POST /api/checkerboard/detect`. A missing board is informative; the final
-`require_corners` check remains atomic inside `POST /api/capture`.
+`POST /api/checkerboard/detect`. A missing board is informative only. At every
+sample the image and joint record are **always** saved (`require_corners=false`
+is sent to 8131); `plan.on_missing_corners` decides what happens next when
+`corners_detected` comes back false: `continue` (default) keeps sampling the
+remaining nodes, `abort` stops sampling and walks the rest of the route (the
+trailing transit nodes) back home. The solver drops images without corners.
 
 ## Import supplied 2D sessions
 
