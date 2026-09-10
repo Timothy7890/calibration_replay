@@ -132,7 +132,7 @@ def create_app(
                 plan.base_url,
                 plan.target,
                 arm=plan.arm,
-                require_corners=plan.require_corners,
+                require_corners=False,  # 图像总是保存；缺角点的处置由引擎按 plan.on_missing_corners 决定
                 camera_serial=plan.camera_serial,
             )
         )

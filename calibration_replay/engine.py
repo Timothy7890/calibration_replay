@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+from .adapters import CaptureSkippedError
 from .models import ARM_LABELS, Plan, route_for_plan, validate_plan, validate_q
 from .motion import interpolate_segment, segment_duration
 from .stability import wait_for_stability
@@ -313,6 +314,7 @@ class ReplayEngine:
                 self._set_state("preflight", "灵巧手正在回零位并保持…")
                 self._sleep_interruptible(self.hand_hold_settle_s)
             route = route_for_plan(plan)
+            sampling_aborted: str | None = None  # 触发"停止采样"的节点名
             for index, (node, leg) in enumerate(route):
                 self._set_state(
                     "returning" if leg == "reverse" else "moving",
@@ -346,7 +348,10 @@ class ReplayEngine:
                         f"{certificate['residual_max_rad']:.3f} rad（>"
                         f"{plan.stability.max_error_rad:.3f}），按实测继续",
                     )
-                if leg == "forward" and node.role == "sample":
+                if leg == "forward" and node.role == "sample" and sampling_aborted:
+                    # 已决定停止采样：剩余采样点当过渡点走，直到最后一个节点再回原点
+                    self._set_state("moving", f"经过 {node.name}（已停止采样，正在沿剩余路径返回）")
+                elif leg == "forward" and node.role == "sample":
                     delay = float(plan.stability.capture_delay_s)
                     if delay > 0:
                         self._set_state("settling", f"{node.name} 已静止，等待 {delay:.1f}s 后拍摄")
@@ -355,29 +360,73 @@ class ReplayEngine:
                     capture_id = hashlib.sha256(
                         f"{run_id}:{node.id}".encode("utf-8")
                     ).hexdigest()[:24]
-                    result = adapter.capture(
-                        capture_id=capture_id,
-                        run_id=run_id,
-                        waypoint_id=node.id,
-                        target_q_rad=node.q_rad,
-                        stability=certificate,
-                        record_dir=run_dir,
-                    )
-                    item = {
-                        "capture_id": capture_id,
-                        "node_id": node.id,
-                        "result": result,
-                    }
+                    try:
+                        result = adapter.capture(
+                            capture_id=capture_id,
+                            run_id=run_id,
+                            waypoint_id=node.id,
+                            target_q_rad=node.q_rad,
+                            stability=certificate,
+                            record_dir=run_dir,
+                        )
+                        corners = result.get("corners_detected")
+                        item = {
+                            "capture_id": capture_id,
+                            "node_id": node.id,
+                            "node_name": node.name,
+                            "corners_detected": corners,
+                            "result": result,
+                        }
+                        if corners is False:
+                            if plan.on_missing_corners == "abort":
+                                sampling_aborted = node.name
+                                self._set_state(
+                                    "capturing",
+                                    f"{node.name} 未检出棋盘格（图像已保存）。按计划设置停止采样，"
+                                    f"沿剩余过渡点返回原点",
+                                )
+                            else:
+                                self._set_state("capturing", f"{node.name} 未检出棋盘格，图像已保存，继续下一点")
+                    except CaptureSkippedError as exc:
+                        # 这个点没拍到有用的东西（棋盘不在视野里），不算故障：记下、继续走后面的点
+                        item = {
+                            "capture_id": capture_id,
+                            "node_id": node.id,
+                            "node_name": node.name,
+                            "skipped": True,
+                            "reason": str(exc),
+                            "result": None,
+                        }
+                        self._set_state("capturing", f"{node.name} 未检出棋盘格，跳过此点继续")
                     run_record["captures"].append(item)
                     with self._lock:
                         self._captures.append(item)
+                        self._progress["captured"] = sum(1 for c in self._captures if not c.get("skipped"))
+                        self._progress["no_corners"] = sum(
+                            1 for c in self._captures if c.get("corners_detected") is False)
+                        self._progress["skipped"] = sum(1 for c in self._captures if c.get("skipped"))
+                        self._progress["sampling_aborted"] = sampling_aborted
                 self._pause_if_requested(leg)
             self.bridge.stop_hold()
             run_record["finished_at"] = datetime.now(timezone.utc).isoformat()
             run_record["outcome"] = "completed"
+            n_ok = sum(1 for c in run_record["captures"] if not c.get("skipped"))
+            n_nc = sum(1 for c in run_record["captures"] if c.get("corners_detected") is False)
+            n_skip = sum(1 for c in run_record["captures"] if c.get("skipped"))
+            run_record["captured"] = n_ok
+            run_record["no_corners"] = n_nc
+            run_record["skipped"] = n_skip
+            run_record["sampling_aborted_at"] = sampling_aborted
+            summary = f"采集 {n_ok} 张"
+            if n_nc:
+                summary += f"，其中 {n_nc} 张未检出棋盘格"
+            if sampling_aborted:
+                summary += f"；在 {sampling_aborted} 停止采样并返回"
+            if n_skip:
+                summary += f"，{n_skip} 个点采集失败已跳过"
             self._set_state(
                 "completed",
-                f"计划完成，{self._arm_label()}已安全返回原点。"
+                f"计划完成（{summary}），{self._arm_label()}已安全返回原点。"
                 + (f" 数据目录：{run_dir}" if run_dir else ""),
             )
         except InterruptedError:

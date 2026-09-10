@@ -14,6 +14,16 @@ class NonRetryableCaptureError(RuntimeError):
     """Retrying would only repeat the damage (e.g. more misplaced episodes)."""
 
 
+class CaptureSkippedError(RuntimeError):
+    """This sample yielded nothing usable (e.g. no chessboard in view) but the run
+    itself is healthy: the engine records the skip and moves on to the next node
+    instead of freezing the arm mid-air."""
+
+
+class _CornersNotDetected(RuntimeError):
+    """Internal: 8131 refused the shot because the board was not fully visible."""
+
+
 class CaptureAdapter:
     def preflight(self, run_id: str, record_dir: str | None = None) -> dict[str, Any]:
         raise NotImplementedError
@@ -69,6 +79,13 @@ class HttpCaptureAdapter(CaptureAdapter):
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
+            if exc.code == 409:
+                try:
+                    payload = json.loads(detail)
+                except ValueError:
+                    payload = None
+                if isinstance(payload, dict) and payload.get("corners_detected") is False:
+                    raise _CornersNotDetected(str(payload.get("error") or "未检出完整棋盘格")) from exc
             raise RuntimeError(f"{method} {path} returned HTTP {exc.code}: {detail}") from exc
         except (urllib.error.URLError, TimeoutError) as exc:
             raise RuntimeError(f"{method} {path} failed: {exc}") from exc
@@ -255,7 +272,7 @@ class HttpCaptureAdapter(CaptureAdapter):
                     and self.require_corners
                     and result.get("corners_detected") is False
                 ):
-                    raise RuntimeError("capture rejected: chessboard corners not detected")
+                    raise _CornersNotDetected("未检出完整棋盘格")
                 if result.get("arm") not in (None, self.arm):
                     raise NonRetryableCaptureError(
                         f"capture service recorded the {result.get('arm')} arm instead of "
@@ -274,6 +291,13 @@ class HttpCaptureAdapter(CaptureAdapter):
                 return result
             except NonRetryableCaptureError:
                 raise
+            except _CornersNotDetected as exc:
+                # 棋盘不在视野里：检测偶尔会闪断，隔一会再试几次；还是没有就跳过这个点
+                last_error = exc
+                if attempt < self.retries:
+                    time.sleep(0.4 * (attempt + 1))
+                    continue
+                raise CaptureSkippedError(f"{exc}（已重试 {self.retries} 次）") from exc
             except Exception as exc:
                 last_error = exc
                 if attempt < self.retries:

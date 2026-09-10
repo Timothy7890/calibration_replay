@@ -49,7 +49,7 @@ def import_session(
         plan.arm = session_arm
     camera_serial = (session_meta.get("camera") or {}).get("serial")
     plan.camera_serial = str(camera_serial).strip() if camera_serial else None
-    plan.require_corners = True
+    plan.on_missing_corners = "continue"
     plan.draft = True
     plan.metadata = {
         "imported_from": str(root),
@@ -132,7 +132,7 @@ def import_3d_task(
 
     plan = Plan.create(name=name, target="hand_eye_3D", base_url=base_url)
     plan.camera_serial = None
-    plan.require_corners = False
+    plan.on_missing_corners = "continue"
     plan.draft = True
     plan.metadata = {
         "imported_from": str(root),

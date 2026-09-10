@@ -103,7 +103,11 @@ class Plan:
     nodes: list[PlanNode] = field(default_factory=list)
     motion: MotionConfig = field(default_factory=MotionConfig)
     stability: StabilityConfig = field(default_factory=StabilityConfig)
-    require_corners: bool = True
+    # 2D：采样点上未检出完整棋盘格时怎么办。图像与关节角**总是保存**（求解会自动剔除
+    # 没角点的图），这里只决定后续：continue=继续采后面的点；abort=不再采样，沿剩余
+    # 路径走到最后的过渡点后回原点。require_corners 仅为兼容旧计划文件保留，不再使用。
+    on_missing_corners: str = "continue"
+    require_corners: bool = False
     # 拍摄期间让灵巧手保持零位（经 8132 → 18089 周期下发全零）。标记贴在手上，
     # 手指姿态变了标记就相对腕系移动，所以默认开。
     hold_hand_zero: bool = True
@@ -140,7 +144,11 @@ class Plan:
             nodes=[PlanNode(**node) for node in value.get("nodes", [])],
             motion=MotionConfig(**value.get("motion", {})),
             stability=StabilityConfig(**value.get("stability", {})),
-            require_corners=bool(value.get("require_corners", True)),
+            on_missing_corners=(
+                str(value.get("on_missing_corners") or "continue")
+                if str(value.get("on_missing_corners") or "continue") in ("continue", "abort") else "continue"
+            ),
+            require_corners=False,
             hold_hand_zero=bool(value.get("hold_hand_zero", True)),
             draft=bool(value.get("draft", True)),
             version=int(value.get("version", PLAN_VERSION)),

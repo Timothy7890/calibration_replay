@@ -95,3 +95,5 @@ ol.stops li .right{margin-left:auto}
 .seg button.on{background:#173a58;color:#9fd0ff;font-weight:700}
 .seg.big button{padding:6px 18px;font-size:14px}
 .tag.arm-left{background:#3a2a58;color:#d6c2ff}.tag.arm-right{background:#173a58;color:#9fd0ff}
+
+.captures tr.skipped td { color: #d9a441; }
