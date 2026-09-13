@@ -25,6 +25,7 @@
       <span class="pill muted" v-else title="18000 能力中心不可达">18000 离线</span>
       <span class="pill" v-if="arm.guide" style="background:#4a3a10">拖动中</span>
       <span class="pill" v-if="arm.motion_enabled" style="background:#173a58">运动使能</span>
+      <span class="pill" v-if="!status.mock" :class="payload.active ? 'on' : 'muted'" :title="payloadTitle" style="cursor:pointer" @click="reloadPayload" v-text="payloadLabel + ' ↻'"></span>
       <span class="pill muted" v-if="status.mock">mock</span>
     </div>
     <button class="stop" @click="act('stop')" title="急停：立刻丢弃剩余轨迹，手臂在当前位置冻结并刚性保持">■ 急停</button>

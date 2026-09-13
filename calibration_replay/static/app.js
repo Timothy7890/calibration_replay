@@ -457,6 +457,30 @@ createApp({
       await post("/api/control/" + name, name === "engage" && plan.value ? { plan_id: plan.value.id } : {});
       await refreshStatus();
     });
+    // 末端负载重力补偿（arm_payload_gravity 10183 的标定结果），接管时自动加载；此处可手动重读文件
+    const payload = computed(() => arm.value.payload || {});
+    const payloadLabel = computed(() => {
+      const p = payload.value;
+      if (!p.enabled) return "负载补偿关闭";
+      if (p.active) return `负载补偿 ${Number(p.mass_kg).toFixed(2)} kg · α${Number(p.alpha).toFixed(2)}`;
+      const f = p.file || {};
+      if (f.exists) return `负载补偿待加载 ${Number(f.mass_kg).toFixed(2)} kg`;
+      return "负载未标定";
+    });
+    const payloadTitle = computed(() => {
+      const p = payload.value, f = p.file || {};
+      const lines = [];
+      if (p.active) lines.push(`已注入：m=${Number(p.mass_kg).toFixed(3)} kg  质心=[${(p.com_m || []).map((v) => Number(v).toFixed(3)).join(", ")}] m  α=${Number(p.alpha).toFixed(3)}`, `来源 ${p.source_session || "?"} · 应用于 ${p.applied_at || "?"}`);
+      else if (p.reason) lines.push(p.reason);
+      if (f.path) lines.push(`文件 ${f.path}${f.exists ? "" : "（不存在）"}`);
+      if (f.error) lines.push(f.error);
+      return lines.join("\n");
+    });
+    const reloadPayload = () => guard(async () => {
+      const d = await post("/api/payload/reload");
+      say(d.active ? `负载补偿已重载：${Number(d.mass_kg).toFixed(3)} kg` : (d.reason || "未加载"), d.active ? "ok" : "warn", 4000);
+      await refreshStatus();
+    });
     const run = () => guard(async () => {
       if (!confirm("确认开始运行？手臂会沿计划路线运动，请确保有人在机器人旁监护。")) return;
       const d = await post("/api/control/run/" + plan.value.id, { run_id: runId.value.trim() || null });
@@ -501,7 +525,7 @@ createApp({
       loadPlans, loadPlan, savePlan, createPlan, deletePlan, import3D, import2D, importDefaults,
       nodeEdit, moveNode, removeNode, recordNode, manualNode, autoInsertTransits, returnDelta, autoPlace, autoplaceNode,
       editShown, editStart, editInput, editCancel, editCommit,
-      validatePlan, exportPlan, act, run,
+      validatePlan, exportPlan, act, run, payload, payloadLabel, payloadTitle, reloadPayload,
       viewerEl, preview, previewLoading, previewError, previewFrame, previewPlaying, previewSpeed,
       currentStop, currentStopIndex, loadPreview, togglePlay, scrub,
       get viewer() { return viewer; },

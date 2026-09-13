@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .models import ARMS, joint_names_for
+from .payload import PayloadStore
 
 _PACKAGE_NAME = "_calibration_replay_h2_backend"
 
@@ -142,6 +143,12 @@ class MockArmBridge:
             "gyro_rad_s": [0.0, 0.0, 0.0],
         }
 
+    def payload_info(self) -> dict[str, Any]:
+        return {"enabled": False, "active": False, "arm": self.arm, "reason": "mock 无重力前馈"}
+
+    def reload_payload(self) -> dict[str, Any]:
+        return self.payload_info()
+
     def status(self) -> dict[str, Any]:
         return {
             "source": self.source,
@@ -152,6 +159,7 @@ class MockArmBridge:
             "joint_names": self.joint_names,
             "measured_rad": self.read_sample()["q"],
             "limits_rad": self.limits,
+            "payload": self.payload_info(),
         }
 
 
@@ -160,7 +168,8 @@ class H2ArmBridge:
 
     source = "h2"
 
-    def __init__(self, project: str | Path, network_interface: str | None, arm: str = "right"):
+    def __init__(self, project: str | Path, network_interface: str | None, arm: str = "right",
+                 payload_store: PayloadStore | None = None):
         self.project = str(Path(project).expanduser().resolve())
         self.network_interface = network_interface
         self.arm = arm
@@ -169,6 +178,10 @@ class H2ArmBridge:
         self._controller = None
         self._reader = None
         self._lock = threading.RLock()
+        # 末端负载重力补偿（arm_payload_gravity 标定结果）；None = 禁用，沿用作者原前馈
+        self.payload_store = payload_store or PayloadStore(None, None)
+        self._payload: dict[str, Any] = {"enabled": self.payload_store.enabled, "active": False, "arm": arm,
+                                         "reason": "未接管"}
 
     def select_arm(self, arm: str) -> None:
         """Which arm read-only queries (joints, record node) refer to. Both arms
@@ -234,6 +247,8 @@ class H2ArmBridge:
                 payload_kg=0.0,
                 grav_in_float=True,
             )
+            # 负载补偿在 start() 前注入：控制线程第一周期就带负载前馈，接管瞬间不会先下垂再抬起
+            self._payload = self.payload_store.apply(controller, self.arm)
             controller.start()
             self._controller = controller
             self.joint_names = list(controller.joint_names)
@@ -242,8 +257,26 @@ class H2ArmBridge:
     def disarm(self) -> None:
         with self._lock:
             controller, self._controller = self._controller, None
+            self._payload = {"enabled": self.payload_store.enabled, "active": False, "arm": self.arm, "reason": "未接管"}
         if controller is not None:
             controller.shutdown()
+
+    def payload_info(self) -> dict[str, Any]:
+        with self._lock:
+            info = dict(self._payload)
+        info["file"] = self.payload_store.describe_file(self.arm)
+        return info
+
+    def reload_payload(self) -> dict[str, Any]:
+        """重新读 payload_<arm>.json 并热替换前馈（10183 里「应用并保存」之后调用，不必解除接管）。"""
+        with self._lock:
+            controller = self._controller
+            if controller is None:
+                self._payload = {"enabled": self.payload_store.enabled, "active": False, "arm": self.arm,
+                                 "reason": "未接管；接管时会自动加载"}
+            else:
+                self._payload = self.payload_store.apply(controller, self.arm)
+        return self.payload_info()
 
     def guide(self) -> bool:
         with self._lock:
@@ -326,9 +359,11 @@ class H2ArmBridge:
                 "joint_names": self.joint_names,
                 "measured_rad": sample["q"],
                 "limits_rad": self.limits,
+                "payload": self.payload_info(),
             }
         status = controller.status()
         status["source"] = self.source
         status["motion_enabled"] = bool(status.get("jog_enabled"))
         status["guide"] = bool(status.get("float"))
+        status["payload"] = self.payload_info()
         return status

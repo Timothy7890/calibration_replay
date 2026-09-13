@@ -50,12 +50,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="With --mock: still call the 2D/3D capture service over HTTP "
         "(start it in its own mock mode) for a full-stack rehearsal",
     )
+    parser.add_argument(
+        "--payload-gravity-project",
+        default=str(project_root / "arm_payload_gravity"),
+        help="arm_payload_gravity 项目目录（提供 GravityWithPayload / ArmGravity）",
+    )
+    parser.add_argument(
+        "--payload-dir",
+        default=None,
+        help="payload_<arm>.json 所在目录（10183「应用并保存」的输出；默认 <payload-gravity-project>/config）",
+    )
+    parser.add_argument(
+        "--no-payload",
+        action="store_true",
+        help="不注入末端负载重力补偿，沿用作者 H2ArmController 原前馈",
+    )
     return parser
 
 
 def main() -> None:
     args = build_parser().parse_args()
+    payload_project = Path(args.payload_gravity_project).expanduser()
+    payload_dir = None if args.no_payload else (args.payload_dir or str(payload_project / "config"))
     config = AppConfig(
+        payload_gravity_project=None if args.no_payload else str(payload_project),
+        payload_dir=payload_dir,
         data_root=args.data_root,
         h2_project=args.hand_eye_3d_project,
         network_interface=args.network_interface,

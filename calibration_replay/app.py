@@ -18,6 +18,7 @@ from .bridge import H2ArmBridge, MockArmBridge, read_urdf_limits
 from .engine import ReplayEngine
 from .exporter import build_route_trajectory, export_ik_replay
 from .importer import import_3d_task, import_session
+from .payload import PayloadStore
 
 from .models import (
     ARM_LABELS, ARMS, Plan, PlanNode, best_insert_index, mirror_plan, validate_plan, validate_q,
@@ -40,6 +41,10 @@ class AppConfig:
     robot_mesh_dir: str | None = None
     # 18000 capability registry (which arm/hand the robot currently has active).
     capability_url: str = "http://127.0.0.1:18000"
+    # 末端负载重力补偿：arm_payload_gravity 项目目录 + 它「应用并保存」出的 payload_<arm>.json 所在目录。
+    # payload_dir=None 表示不注入（沿用作者 H2ArmController 原前馈）。
+    payload_gravity_project: str | None = None
+    payload_dir: str | None = None
 
 
 def arm_preview(arm: str) -> dict:
@@ -135,10 +140,11 @@ def create_app(
         if getattr(bridge, "arm", plan.arm) == plan.arm:
             return getattr(bridge, "limits", None)
         return None if config.mock else read_urdf_limits(config.h2_project, plan.arm)
+    payload_store = PayloadStore(config.payload_dir, config.payload_gravity_project)
     bridge = bridge or (
         MockArmBridge()
         if config.mock
-        else H2ArmBridge(config.h2_project, config.network_interface)
+        else H2ArmBridge(config.h2_project, config.network_interface, payload_store=payload_store)
     )
     if adapter_factory is None:
         adapter_factory = (
@@ -581,6 +587,19 @@ def create_app(
             return {"ok": True}
         except RuntimeError as exc:
             raise HTTPException(409, str(exc)) from exc
+
+    @app.get("/api/payload")
+    def payload():
+        """末端负载重力补偿状态：接管中是否已注入、磁盘上 payload_<arm>.json 现在是什么。"""
+        info = bridge.payload_info() if hasattr(bridge, "payload_info") else {"enabled": False, "active": False}
+        return {"ok": True, **info}
+
+    @app.post("/api/payload/reload")
+    def payload_reload():
+        """10183 里「应用并保存」之后调用：重读 payload_<arm>.json，接管中热替换前馈，不必解除接管。"""
+        if not hasattr(bridge, "reload_payload"):
+            raise HTTPException(409, "当前 bridge 不支持负载补偿")
+        return {"ok": True, **bridge.reload_payload()}
 
     static_dir = Path(__file__).with_name("static")
     app.mount("/static", StaticFiles(directory=static_dir), name="static")

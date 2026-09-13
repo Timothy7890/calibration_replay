@@ -23,6 +23,10 @@ DATA_ROOT=${DATA_ROOT:-/home/robot/yx/project/calib/calibration_replay_data}
 HAND_EYE_3D_PROJECT=${HAND_EYE_3D_PROJECT:-/home/robot/yx/project/calib/calib_workstation}
 BASE_URL_3D=${BASE_URL_3D:-http://127.0.0.1:18005/three-d}
 BASE_URL_2D=${BASE_URL_2D:-http://127.0.0.1:18005}
+# 末端负载重力补偿（arm_payload_gravity 10183 标定结果 payload_<arm>.json）；PAYLOAD=0 关闭
+PAYLOAD=${PAYLOAD:-1}
+PAYLOAD_GRAVITY_PROJECT=${PAYLOAD_GRAVITY_PROJECT:-/home/robot/yx/project/calib/arm_payload_gravity}
+PAYLOAD_DIR=${PAYLOAD_DIR:-$PAYLOAD_GRAVITY_PROJECT/config}
 
 LOG_DIR=logs/service
 # 按端口区分 PID/日志，避免同时跑 mock 联调实例时互相覆盖
@@ -116,8 +120,26 @@ do_start() {
             return 1
         fi
     fi
+    local payload_args=()
+    if [[ "$PAYLOAD" == "1" ]]; then
+        payload_args=(--payload-gravity-project "$PAYLOAD_GRAVITY_PROJECT" --payload-dir "$PAYLOAD_DIR")
+        if [[ "${1:-}" != "--mock" ]]; then
+            local f found=""
+            for f in "$PAYLOAD_DIR"/payload_left.json "$PAYLOAD_DIR"/payload_right.json; do
+                [[ -f "$f" ]] && found="$found ${f##*/}"
+            done
+            if [[ -n "$found" ]]; then
+                mode="$mode · 负载补偿:$found"
+            else
+                mode="$mode · 负载补偿: 未标定（$PAYLOAD_DIR 下无 payload_*.json，沿用原前馈）"
+            fi
+        fi
+    else
+        payload_args=(--no-payload)
+        mode="$mode · 负载补偿关闭"
+    fi
 
-    nohup "$PYTHON" -m calibration_replay "${mode_args[@]}" \
+    nohup "$PYTHON" -m calibration_replay "${mode_args[@]}" "${payload_args[@]}" \
         --host "$HOST" --port "$PORT" \
         --data-root "$DATA_ROOT" \
         --base-url-3d "$BASE_URL_3D" \
