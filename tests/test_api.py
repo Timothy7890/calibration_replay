@@ -24,9 +24,9 @@ def test_plan_crud_record_validate_and_controls(tmp_path):
         assert {
             plan["target"]: plan["base_url"] for plan in plans
         } == {
-            "hand_eye_2D_head": "http://127.0.0.1:8131",
-            "hand_eye_2D_waist": "http://127.0.0.1:8131",
-            "hand_eye_3D": "http://127.0.0.1:8132",
+            "hand_eye_2D_head": "http://127.0.0.1:18005",
+            "hand_eye_2D_waist": "http://127.0.0.1:18005",
+            "hand_eye_3D": "http://127.0.0.1:18005/three-d",
         }
         response = client.post(
             "/api/plans",

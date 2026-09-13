@@ -16,8 +16,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--network-interface", help="DDS network interface for H2")
     parser.add_argument(
         "--hand-eye-3d-project",
-        default=str(project_root / "hand_eye_3D"),
-        help="Path to the existing hand_eye_3D project",
+        default=str(project_root / "calib_workstation"),
+        help="兼容参数：包含统一H2标定/运动运行时的 calib_workstation 项目",
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=18004)
@@ -26,8 +26,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(Path.cwd() / "replay_data"),
         help="Internal authoritative plans and run records",
     )
-    parser.add_argument("--base-url-2d", default="http://127.0.0.1:8131")
-    parser.add_argument("--base-url-3d", default="http://127.0.0.1:8132")
+    parser.add_argument("--base-url-2d", default="http://127.0.0.1:18005")
+    parser.add_argument("--base-url-3d", default="http://127.0.0.1:18005/three-d")
     parser.add_argument(
         "--capability-url",
         default="http://127.0.0.1:18000",
@@ -37,7 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--robot-mesh-dir",
         default=None,
         help="Directory containing meshes/*.stl for the in-page 3D preview "
-        "(default: hand_eye_3D or IK_replay H2 assets)",
+        "(default: calib_workstation or IK_replay H2 assets)",
     )
     parser.add_argument(
         "--mock",

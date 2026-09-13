@@ -7,6 +7,12 @@ exactly one arm. It keeps separate plans for `hand_eye_2D_head`,
 versioned plan JSON under the configured data root is authoritative; IK_replay
 files are exports.
 
+The supported deployment entry is now `calib_workstation/start.sh`. Both 2D
+and 3D capture endpoints live in the 18005 process (`/api/*` and
+`/three-d/api/*`); 8131/8132 and the standalone hand-eye projects are no
+longer runtime dependencies. This repository remains the isolated 18004 arm
+motion service and the sole `rt/arm_sdk` publisher.
+
 > **PHYSICAL ROBOT WARNING:** This process must be the sole `rt/arm_sdk` owner.
 > Never start either 2D or 3D capture service with `--arm-control` while this
 > service is running. Keep an operator at the robot and ready to press

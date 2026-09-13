@@ -8,9 +8,9 @@ from pathlib import Path
 from .models import ARMS, Plan
 
 DEFAULT_PLANS = (
-    ("2D head", "hand_eye_2D_head", "http://127.0.0.1:8131"),
-    ("2D waist", "hand_eye_2D_waist", "http://127.0.0.1:8131"),
-    ("3D", "hand_eye_3D", "http://127.0.0.1:8132"),
+    ("2D head", "hand_eye_2D_head", "http://127.0.0.1:18005"),
+    ("2D waist", "hand_eye_2D_waist", "http://127.0.0.1:18005"),
+    ("3D", "hand_eye_3D", "http://127.0.0.1:18005/three-d"),
 )
 
 

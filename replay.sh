@@ -8,7 +8,7 @@
 # 联调：./replay.sh start --mock   （无硬件）
 #
 # 启动后只读 rt/lowstate；页面点「接管」之后才发布 rt/arm_sdk。
-# 运行期间 hand_eye_3D 采集端必须用 ./start.sh --no-arm 启动，否则两边抢 rt/arm_sdk。
+# 18005内置标定引擎只读关节；本服务仍是唯一 rt/arm_sdk 发布者。
 # stop 只关闭由本脚本启动并记录 PID 的进程。
 
 set -u
@@ -20,9 +20,9 @@ PORT=${PORT:-18004}
 HOST=${HOST:-0.0.0.0}   # 0.0.0.0 允许局域网访问；只想本机访问改 127.0.0.1
 NETWORK_INTERFACE=${NETWORK_INTERFACE:-enp86s0}
 DATA_ROOT=${DATA_ROOT:-/home/robot/yx/project/calib/calibration_replay_data}
-HAND_EYE_3D_PROJECT=${HAND_EYE_3D_PROJECT:-/home/robot/yx/project/calib/hand_eye_3D}
-BASE_URL_3D=${BASE_URL_3D:-http://127.0.0.1:8132}
-BASE_URL_2D=${BASE_URL_2D:-http://127.0.0.1:8131}
+HAND_EYE_3D_PROJECT=${HAND_EYE_3D_PROJECT:-/home/robot/yx/project/calib/calib_workstation}
+BASE_URL_3D=${BASE_URL_3D:-http://127.0.0.1:18005/three-d}
+BASE_URL_2D=${BASE_URL_2D:-http://127.0.0.1:18005}
 
 LOG_DIR=logs/service
 # 按端口区分 PID/日志，避免同时跑 mock 联调实例时互相覆盖
@@ -48,7 +48,7 @@ owned_pid() {
 }
 
 capture_arm_control_enabled() {
-    # 8132（3D）与 8131（2D）任一开启了手臂控制都会和本服务抢 rt/arm_sdk
+    # 防御性检查：采集引擎不得开启手臂控制，否则会与本服务抢 rt/arm_sdk。
     local url
     for url in "$BASE_URL_3D" "$BASE_URL_2D"; do
         if curl -sf --max-time 2 "$url/api/arm/status" 2>/dev/null |
@@ -112,7 +112,7 @@ do_start() {
         CONFLICT_URL=""
         if capture_arm_control_enabled; then
             echo "[回放] 采集端 $CONFLICT_URL 启用了手臂控制，会和本服务抢 rt/arm_sdk。" >&2
-            echo "       请不带 --arm-control 重启采集端（3D: hand_eye_3D/start.sh --no-arm）。" >&2
+            echo "       请关闭采集端的手臂控制；统一工作站默认不会开启。" >&2
             return 1
         fi
     fi

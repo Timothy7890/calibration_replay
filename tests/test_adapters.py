@@ -247,3 +247,9 @@ def test_2d_missing_corners_becomes_skip_not_fault():
     )
     assert result["corners_detected"] is False
     assert lax.requests[0][2]["require_corners"] is False
+
+
+def test_workstation_url_routes_3d_to_embedded_backend(monkeypatch):
+    monkeypatch.setenv("CALIB_WORKSTATION_URL", "http://127.0.0.1:18005")
+    adapter = HttpCaptureAdapter("http://127.0.0.1:8132", "hand_eye_3D")
+    assert adapter.base_url == "http://127.0.0.1:18005/three-d"

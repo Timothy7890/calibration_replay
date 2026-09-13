@@ -17,7 +17,7 @@ from .adapters import HttpCaptureAdapter, MockCaptureAdapter
 from .bridge import H2ArmBridge, MockArmBridge, read_urdf_limits
 from .engine import ReplayEngine
 from .exporter import build_route_trajectory, export_ik_replay
-from .importer import import_3d_task, import_session, seed_default_imports
+from .importer import import_3d_task, import_session
 
 from .models import (
     ARM_LABELS, ARMS, Plan, PlanNode, best_insert_index, mirror_plan, validate_plan, validate_q,
@@ -33,8 +33,8 @@ class AppConfig:
     mock: bool = False
     # --mock 时仍通过 HTTP 调采集服务（对方也以 mock 启动）：全链路联调用
     mock_capture_http: bool = False
-    base_url_2d: str = "http://127.0.0.1:8131"
-    base_url_3d: str = "http://127.0.0.1:8132"
+    base_url_2d: str = "http://127.0.0.1:18005"
+    base_url_3d: str = "http://127.0.0.1:18005/three-d"
     # In-page 3D preview: URDF comes from the hand_eye_3D project, STL meshes
     # from a directory containing ``meshes/`` (defaults to IK_replay's H2 assets).
     robot_mesh_dir: str | None = None
@@ -107,6 +107,21 @@ def create_app(
     adapter_factory: Callable[[Plan], Any] | None = None,
 ) -> FastAPI:
     store = PlanStore(config.data_root)
+    # 一次性迁移旧项目的本机端口；显式配置的远端/自定义地址保持不变。
+    legacy_local_urls = {
+        "hand_eye_2D_head": "http://127.0.0.1:8131",
+        "hand_eye_2D_waist": "http://127.0.0.1:8131",
+        "hand_eye_3D": "http://127.0.0.1:8132",
+    }
+    canonical_urls = {
+        "hand_eye_2D_head": config.base_url_2d,
+        "hand_eye_2D_waist": config.base_url_2d,
+        "hand_eye_3D": config.base_url_3d,
+    }
+    for saved_plan in store.list():
+        if saved_plan.base_url == legacy_local_urls.get(saved_plan.target):
+            saved_plan.base_url = canonical_urls[saved_plan.target]
+            store.save(saved_plan)
     existing_targets = {plan.target for plan in store.list()}
     for name, target, url in (
         ("2D head", "hand_eye_2D_head", config.base_url_2d),
@@ -199,18 +214,18 @@ def create_app(
 
     @app.get("/api/cameras/2d")
     def cameras_2d():
-        """代理 8131 的相机枚举，给计划页的「2D 相机序列号」下拉用。"""
+        """代理统一工作站的相机枚举，给计划页的「2D 相机序列号」下拉用。"""
         url = config.base_url_2d.rstrip("/") + "/api/camera/devices"
         try:
             opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
             with opener.open(urllib.request.Request(url, headers={"Accept": "application/json"}), timeout=15) as resp:
                 return json.loads(resp.read().decode("utf-8"))
-        except Exception as exc:  # noqa: BLE001 - 8131 没起来也要能回答
-            return {"available": False, "devices": [], "current_serial": None, "last_error": f"8131 不可达: {exc}"}
+        except Exception as exc:  # noqa: BLE001 - 工作站没起来也要能回答
+            return {"available": False, "devices": [], "current_serial": None, "last_error": f"18005不可达: {exc}"}
 
     @app.post("/api/cameras/2d/select")
     def cameras_2d_select(body: dict):
-        """让 8131 切到指定相机（录点时取景用；运行前预检仍会按计划的序列号再校验一次）。"""
+        """让统一工作站切到指定相机（录点时取景用；运行前仍会校验序列号）。"""
         serial = str((body or {}).get("serial") or "").strip()
         if not serial:
             raise HTTPException(422, "缺少 serial")
@@ -230,7 +245,7 @@ def create_app(
                 message = detail
             raise HTTPException(409, f"切换相机失败: {message}") from exc
         except Exception as exc:  # noqa: BLE001
-            raise HTTPException(502, f"8131 不可达: {exc}") from exc
+            raise HTTPException(502, f"18005不可达: {exc}") from exc
 
     @app.get("/api/status")
     def status():
@@ -471,11 +486,6 @@ def create_app(
             raise HTTPException(422, "output_dir is required") from exc
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
-
-    @app.post("/api/import/default-sessions")
-    def import_defaults():
-        plans = seed_default_imports(store, config.base_url_2d)
-        return {"ok": True, "created": [plan.to_dict() for plan in plans]}
 
     @app.post("/api/import/session")
     def import_custom(body: dict):

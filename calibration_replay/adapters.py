@@ -22,7 +22,7 @@ class CaptureSkippedError(RuntimeError):
 
 
 class _CornersNotDetected(RuntimeError):
-    """Internal: 8131 refused the shot because the board was not fully visible."""
+    """Internal: the 2D engine refused a shot because the board was incomplete."""
 
 
 class CaptureAdapter:
@@ -56,11 +56,12 @@ class HttpCaptureAdapter(CaptureAdapter):
         retries: int = 2,
     ):
         workstation_url = os.environ.get("CALIB_WORKSTATION_URL", "").rstrip("/")
-        self.base_url = (
-            workstation_url
-            if target.startswith("hand_eye_2D") and workstation_url
-            else base_url.rstrip("/")
-        )
+        if workstation_url and target.startswith("hand_eye_2D"):
+            self.base_url = workstation_url
+        elif workstation_url and target == "hand_eye_3D":
+            self.base_url = workstation_url + "/three-d"
+        else:
+            self.base_url = base_url.rstrip("/")
         self.target = target
         self.arm = arm
         self.arm_selectable = False
@@ -101,10 +102,10 @@ class HttpCaptureAdapter(CaptureAdapter):
         return bool(payload.get("ok", payload.get("success", True)))
 
     def begin_hand_hold(self, hand_id: str | None, side: str) -> dict[str, Any] | None:
-        """拍摄期间让灵巧手保持零位：8132 /api/mount/hand-hold/start → 18089 周期下发全零。
+        """拍摄期间让灵巧手保持零位：18005 3D API → 18089 周期下发全零。
 
         只对 hand_eye_3D 有意义（2D 棋盘格与手指无关）。18089 被别的控制源占用时
-        8132 返回 409，这里原样抛出，由引擎当作预检失败——绝不抢占。"""
+        3D API 返回409时原样抛出，由引擎当作预检失败——绝不抢占。"""
         if self.target != "hand_eye_3D":
             return None
         if not hand_id:
@@ -126,7 +127,7 @@ class HttpCaptureAdapter(CaptureAdapter):
         try:
             self._request("POST", "/api/mount/hand-hold/stop", {})
         except Exception:
-            # 收尾尽力而为；保持线程在 8132 里，下次 start 会幂等复用或报占用
+            # 收尾尽力而为；保持线程在18005里，下次start会幂等复用或报占用
             pass
 
     def preflight(self, run_id: str, record_dir: str | None = None) -> dict[str, Any]:
@@ -150,7 +151,7 @@ class HttpCaptureAdapter(CaptureAdapter):
             )
         active_arm = health.get("arm")
         recording = health.get("recording") or {}
-        # 新版 8132 可按请求记录任一条臂（同一帧 lowstate 的另一组电机）；
+        # 统一3D API可按请求记录任一条臂（同一帧lowstate的另一组电机）；
         # 旧版只记 --arm 那条臂，此时必须与计划一致，否则关节数据是另一条臂的。
         self.arm_selectable = bool(recording.get("arm_selectable"))
         if active_arm is not None and active_arm != self.arm and not self.arm_selectable:
@@ -161,7 +162,7 @@ class HttpCaptureAdapter(CaptureAdapter):
         result = {"ok": True, "health": health, "arm": arm}
         if self.target.startswith("hand_eye_2D"):
             # 会话直接落到本次运行的目录（runs/<arm>/<run_id>/），与 3D 的 record_dir 同义；
-            # 8131 按请求切臂，返回的 arm 必须与计划一致。
+            # 统一2D API按请求切臂，返回的arm必须与计划一致。
             session_body: dict[str, Any] = {"run_id": run_id, "arm": self.arm}
             session_body["camera_role"] = self.target.removeprefix("hand_eye_2D_")
             if record_dir:
@@ -196,10 +197,10 @@ class HttpCaptureAdapter(CaptureAdapter):
                     f"plan is for the {self.arm} arm"
                 )
             if record_dir and session.get("save_path") not in (None, record_dir.rstrip("/")):
-                # 旧版 8131 忽略 record_dir 会写进自己的目录：宁可失败也不能让数据混进去
+                # 不兼容后端若忽略record_dir会写进自己的目录：宁可失败也不能混入数据
                 raise RuntimeError(
                     f"2D capture service ignored record_dir and will write to "
-                    f"{session.get('save_path')}; restart the hand_eye_2D backend (8131)"
+                    f"{session.get('save_path')}; restart the unified workstation (18005)"
                 )
             result["session"] = session
 
@@ -264,7 +265,7 @@ class HttpCaptureAdapter(CaptureAdapter):
             body["frame_count"] = self.frame_count
             body["arm"] = self.arm
             if record_dir:
-                # 8132 与本服务同机：episode 直接落到本次运行的目录
+                # 18005与本服务同机：episode直接落到本次运行的目录
                 body["record_dir"] = record_dir
         else:
             path = "/api/capture"

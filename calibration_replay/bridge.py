@@ -24,7 +24,9 @@ def _load_backend(project: str | Path):
     root = Path(project).expanduser().resolve()
     init_file = root / "backend" / "__init__.py"
     if not init_file.is_file():
-        raise FileNotFoundError(f"hand_eye_3D backend not found under {root}")
+        init_file = root / "calib_workstation" / "calib3d" / "__init__.py"
+    if not init_file.is_file():
+        raise FileNotFoundError(f"H2 calibration runtime not found under {root}")
     if _PACKAGE_NAME not in sys.modules:
         spec = importlib.util.spec_from_file_location(
             _PACKAGE_NAME,

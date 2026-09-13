@@ -5,20 +5,6 @@ from pathlib import Path
 
 from .models import ARMS, JOINT_NAMES, Plan, PlanNode, joint_names_for
 
-DEFAULT_SESSIONS = {
-    "hand_eye_2D_head": Path(
-        "/home/robot/yx/project/calib/hand_eye_2D/handeye_data/20260902_170106"
-    ),
-    "hand_eye_2D_waist": Path(
-        "/home/robot/yx/project/calib/hand_eye_2D/handeye_data/20260902_173157"
-    ),
-}
-DEFAULT_LABELS = {
-    "hand_eye_2D_head": "Imported 2D head",
-    "hand_eye_2D_waist": "Imported 2D waist",
-}
-
-
 def import_session(
     session_dir: str | Path,
     *,
@@ -179,18 +165,3 @@ def import_3d_task(
     if not plan.nodes:
         raise ValueError(f"{root} contains no hand_eye_calibration episodes")
     return plan
-
-
-def seed_default_imports(store, base_url: str) -> list[Plan]:
-    created: list[Plan] = []
-    existing_sources = {
-        plan.metadata.get("imported_from") for plan in store.list() if plan.metadata
-    }
-    for target, source in DEFAULT_SESSIONS.items():
-        if str(source.resolve()) in existing_sources:
-            continue
-        label = DEFAULT_LABELS[target]
-        plan = import_session(source, target=target, name=label, base_url=base_url)
-        store.save(plan)
-        created.append(plan)
-    return created
