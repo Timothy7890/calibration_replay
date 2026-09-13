@@ -168,12 +168,12 @@
           <button class="danger" @click="act('disarm')" :disabled="!arm.engaged || running">解除接管（先扶住手臂）</button>
           <button class="danger" @click="act('stop')" title="急停：冻结在当前位置并刚性保持">■ 急停</button>
         </div>
-        <!-- 3D：8132 实时 RGB + SDK 对齐深度伪彩叠加（标记板要落在有效深度范围 0.3~2 m 内） -->
+        <!-- 3D：18005 内置实时 RGB + SDK 对齐深度伪彩叠加（标记板要落在有效深度范围 0.3~2 m 内） -->
         <div class="cam" v-if="plan.target === 'hand_eye_3D'">
           <div class="cam-view">
             <img v-if="cam3d.base" v-show="cam3d.online" :src="cam3d.base + '/api/frame.jpg?v=' + cam3d.v" alt="" @load="cam3dLoaded" @error="cam3dFailed">
             <img v-if="cam3d.base && cam3d.showDepth && cam3d.online" class="cam-depth" :src="cam3d.base + '/api/depth-overlay.png?v=' + cam3d.v" :style="{ opacity: cam3d.opacity / 100 }" alt="深度叠加">
-            <div v-if="!cam3d.online" class="cam-empty">{{ cam3d.base ? '正在连接 8132 画面…（8132 未启动或相机未连接）' : '计划没有采集服务 URL' }}</div>
+            <div v-if="!cam3d.online" class="cam-empty">{{ cam3d.base ? '正在连接 18005 内置3D画面…（标定工作站未启动或相机未连接）' : '计划没有采集服务 URL' }}</div>
             <div class="cam-badges">
               <span class="tag" :class="cam3d.online ? 'ok' : 'warn'">{{ cam3d.online ? '画面在线' : '画面离线' }}</span>
               <span class="tag" v-if="cam3d.showDepth && cam3d.online">深度叠加 {{ cam3d.opacity }}%</span>
@@ -187,7 +187,7 @@
               <input type="range" min="10" max="90" step="5" v-model.number="cam3d.opacity" :disabled="!cam3d.showDepth" style="width:140px">
               <span class="muted small">{{ cam3d.opacity }}%</span>
             </div>
-            <p class="muted small" style="margin-top:8px">画面来自 8132（{{ plan.base_url }}）。</p>
+            <p class="muted small" style="margin-top:8px">画面来自 18005 内置3D服务（{{ plan.base_url }}）。</p>
           </div>
         </div>
         <!-- 2D：8131 实时画面 + 棋盘格角点叠加，录点时当取景器 -->
@@ -286,11 +286,11 @@
       <!-- ---------- 5 运行 ---------- -->
       <section class="card" id="s5">
         <h2><span class="num">5</span> 运行</h2>
-        <p class="muted small">启动条件：已接管、当前姿态在原点附近、校验通过、8132 采集端没开手臂控制。每到采样点稳定后自动触发拍摄。</p>
+        <p class="muted small">启动条件：已接管、当前姿态在原点附近、校验通过、18005 内置3D采集服务可用。每到采样点稳定后自动触发拍摄。</p>
         <div class="toolbar">
           <input v-model="runId" placeholder="运行名：中英文/数字/._-（可空，自动 计划名_时间）" style="width:300px" title="本次运行的数据目录名：calibration_replay_data/runs/<运行名>/">
           <label class="inline" title="判定手臂静止后，再等这么久才触发拍摄；改动后自动保存">静止后等待 <input type="number" min="0" step=".1" v-model.number="plan.stability.capture_delay_s" @change="savePlan" style="width:70px"> s 再拍</label>
-          <label class="inline" v-if="plan.target==='hand_eye_3D'" title="运行期间经 8132 → 18089 每 0.3s 下发全零位置，让灵巧手回到并停在零位；标记贴在手上，手指姿态一变标记就相对腕系移动。手型取 18000 当前激活的手；18089 被其他控制源占用时运行会在预检阶段拒绝，不会抢占。运行结束/急停自动停止保持。改动后自动保存">
+          <label class="inline" v-if="plan.target==='hand_eye_3D'" title="运行期间经 18005 → 18089 每 0.3s 下发全零位置，让灵巧手回到并停在零位；标记贴在手上，手指姿态一变标记就相对腕系移动。手型取 18000 当前激活的手；18089 被其他控制源占用时运行会在预检阶段拒绝，不会抢占。运行结束/急停自动停止保持。改动后自动保存">
             <input type="checkbox" v-model="plan.hold_hand_zero" @change="savePlan"> 拍摄期间保持灵巧手零位
             <span v-if="plan.hold_hand_zero && capability && capability.available && capability.hand_name" class="muted small">（{{ capability.hand_name }}）</span>
             <span v-else-if="plan.hold_hand_zero && capability && !capability.hand_id" class="bad small">18000 未上报激活手型，运行会被拒绝</span>

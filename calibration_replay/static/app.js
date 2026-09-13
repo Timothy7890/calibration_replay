@@ -28,17 +28,17 @@ function zh(msg) {
     .replace(/at least one enabled transit or sample node is required/g, "至少需要一个启用的过渡点或采样点")
     .replace(/adjacent nodes (\S+)->(\S+) delta ([\d.]+) exceeds ([\d.]+)/g, "相邻节点 $1 → $2 差值 $3 rad 超过 $4，中间要补过渡点")
     .replace(/return leg (\S+)->home (\S+) delta ([\d.]+) exceeds ([\d.]+); append transit nodes after the last node/g, "回程过渡不足：末点 $1 → 原点 差值 $3 rad 超过 $4，点「自动补过渡点」在末尾生成回程过渡帧")
-    .replace(/capture service ignored record_dir and wrote to (\S+); restart the hand_eye_3D backend \(8132\).*/g, "8132 采集端是旧版本，忽略了运行目录并把数据写到了 $1；请重启 hand_eye_3D 后端（./start.sh）后重跑")
-    .replace(/capture service recorded the (left|right) arm instead of (left|right); restart the hand_eye_3D backend \(8132\) with --arm (left|right)/g, (m, a, b, c) => `8132 采集端是旧版本，记录的是${armName[a]}而不是${armName[b]}；请用 --arm ${c} 重启采集端`)
+    .replace(/capture service ignored record_dir and wrote to (\S+); restart the hand_eye_3D backend \(8132\).*/g, "3D采集服务版本过旧，忽略了运行目录并把数据写到了 $1；请重启标定工作站后重跑")
+    .replace(/capture service recorded the (left|right) arm instead of (left|right); restart the hand_eye_3D backend \(8132\) with --arm (left|right)/g, (m, a, b) => `3D采集服务记录的是${armName[a]}而不是${armName[b]}；请重启标定工作站后重跑`)
     .replace(/hand hold failed: 18000 has no active hand.*/g, "18000 没有激活的灵巧手，无法保持零位；到 18000 激活手型，或在运行区取消「拍摄期间保持灵巧手零位」")
-    .replace(/hand hold failed: (.*)/g, (m, r) => `灵巧手零位保持失败（8132/18089）：${r}`)
+    .replace(/hand hold failed: (.*)/g, (m, r) => `灵巧手零位保持失败（18005/18089）：${r}`)
     .replace(/run name already used: .*?already exists at (\S+)/g, "运行名已被用过（$1），换一个名字")
     .replace(/run_id must be 1-128 characters.*/g, "运行名可用中英文、数字、. _ -（1～128 个字符），不能含空格或斜杠")
     .replace(/node (\S+) joint (\d+)=([-\d.]+) outside \[([-\d.]+), ([-\d.]+)\]/g, "节点 $1 第 $2 关节 $3 超出限位 [$4, $5]")
     .replace(/cannot engage during a run/g, "运行中不能重复接管")
     .replace(/plan is for the (left|right) arm but the (left|right) arm is engaged; disarm and engage the plan's arm/g, (m, a, b) => `计划是${armName[a]}，但当前接管的是${armName[b]}；先解除接管，再按计划接管${armName[a]}`)
     .replace(/(left|right) arm is engaged; disarm before switching to (left|right)/g, (m, a, b) => `${armName[a]}正在接管中，切换到${armName[b]}前先解除接管`)
-    .replace(/capture service is recording the (left|right) arm but this plan is for the (left|right) arm; restart it with --arm (left|right)/g, (m, a, b, c) => `8132 采集端当前记录的是${armName[a]}，计划是${armName[b]}；请用 --arm ${c} 重启采集端`)
+    .replace(/capture service is recording the (left|right) arm but this plan is for the (left|right) arm; restart it with --arm (left|right)/g, (m, a, b) => `3D采集服务当前记录的是${armName[a]}，计划是${armName[b]}；请重启标定工作站后重跑`)
     .replace(/was recorded with the (left|right) arm but earlier episodes use the (left|right) arm; one plan drives one arm/g, (m, a, b) => `混有${armName[a]}和${armName[b]}的 episode，一个计划只能驱动一条臂`)
     .replace(/arm is not engaged/g, "手臂尚未接管");
 }
@@ -86,18 +86,19 @@ createApp({
       say(`已切到相机 ${serial}`);
     });
 
-    // ---------- 8132 实时画面 + 深度叠加（3D 计划录点用的取景器） ----------
+    // ---------- 18005 内置实时画面 + 深度叠加（3D 计划录点用的取景器） ----------
     const cam3d = reactive({ base: "", v: Date.now(), online: false, showDepth: true, opacity: 55 });
     let cam3dTimer = null;
     const cam3dTick = (delay) => { clearTimeout(cam3dTimer); cam3dTimer = setTimeout(() => { cam3d.v = Date.now(); }, delay); };
     const cam3dLoaded = () => { cam3d.online = true; cam3dTick(160); };
     const cam3dFailed = () => { cam3d.online = false; cam3dTick(800); };
     const publicBase = (baseUrl) => {
-      // 计划里的 http://127.0.0.1:8132 → 浏览器能访问的 http://<本页主机>:8132
+      // 保留 /three-d 等路径，仅把计划里的本机地址替换为浏览器正在访问的主机。
       try {
         const u = new URL(baseUrl);
         const host = ["127.0.0.1", "localhost", "0.0.0.0"].includes(u.hostname) ? location.hostname : u.hostname;
-        return `${u.protocol}//${host}${u.port ? ":" + u.port : ""}`;
+        const path = u.pathname.replace(/\/+$/, "");
+        return `${u.protocol}//${host}${u.port ? ":" + u.port : ""}${path}`;
       } catch { return ""; }
     };
 
