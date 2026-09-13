@@ -71,9 +71,10 @@ def test_2d_preflight_order_and_exact_capture_body():
         ("POST", "/api/checkerboard/detect"),
     ]
     assert adapter.requests[2][2] == {
-        "run_id": "batch-01", "arm": "right", "record_dir": "/data/runs/right/batch-01",
+        "run_id": "batch-01", "arm": "right", "camera_role": "head",
+        "record_dir": "/data/runs/right/batch-01",
     }
-    assert adapter.requests[3][2] == {"serial": "CAM-22"}
+    assert adapter.requests[3][2] == {"serial": "CAM-22", "camera_role": "head"}
 
     adapter = FakeHttpAdapter(
         {"/api/capture": {"success": True, "index": 4, "arm": "right",

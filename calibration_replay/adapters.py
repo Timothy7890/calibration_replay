@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 import urllib.error
 import urllib.request
@@ -54,7 +55,12 @@ class HttpCaptureAdapter(CaptureAdapter):
         timeout_s: float = 10.0,
         retries: int = 2,
     ):
-        self.base_url = base_url.rstrip("/")
+        workstation_url = os.environ.get("CALIB_WORKSTATION_URL", "").rstrip("/")
+        self.base_url = (
+            workstation_url
+            if target.startswith("hand_eye_2D") and workstation_url
+            else base_url.rstrip("/")
+        )
         self.target = target
         self.arm = arm
         self.arm_selectable = False
@@ -157,6 +163,7 @@ class HttpCaptureAdapter(CaptureAdapter):
             # 会话直接落到本次运行的目录（runs/<arm>/<run_id>/），与 3D 的 record_dir 同义；
             # 8131 按请求切臂，返回的 arm 必须与计划一致。
             session_body: dict[str, Any] = {"run_id": run_id, "arm": self.arm}
+            session_body["camera_role"] = self.target.removeprefix("hand_eye_2D_")
             if record_dir:
                 session_body["record_dir"] = record_dir
             try:
@@ -198,7 +205,10 @@ class HttpCaptureAdapter(CaptureAdapter):
 
             if self.camera_serial:
                 selected = self._request(
-                    "POST", "/api/camera/select", {"serial": self.camera_serial}
+                    "POST", "/api/camera/select", {
+                        "serial": self.camera_serial,
+                        "camera_role": self.target.removeprefix("hand_eye_2D_"),
+                    }
                 )
                 if not self._response_ok(selected):
                     raise RuntimeError(
