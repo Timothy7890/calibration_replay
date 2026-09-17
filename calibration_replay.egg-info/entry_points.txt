@@ -1,0 +1,2 @@
+[console_scripts]
+calibration-replay = calibration_replay.cli:main

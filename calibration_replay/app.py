@@ -89,6 +89,93 @@ def fetch_capability(url: str, timeout_s: float = 1.5) -> dict:
         "hand_id": hand_id,
         "hand_name": hand.get("name") or hand_id,
         "active": active,
+        "gravity_profiles": list((data.get("meta") or {}).get("gravity_profiles") or []),
+        "gravity_active_version": (data.get("meta") or {}).get("gravity_active_version"),
+    }
+
+
+def resolve_gravity_profile(url: str, arm: str, requested: str | None) -> dict[str, Any]:
+    """Resolve a per-engagement gravity choice against 18000's immutable profiles."""
+    selection = str(requested or "").strip()
+    if selection in {"none", "base"}:
+        return {
+            "mode": "base",
+            "version": "none",
+            "label": "不加载额外负载补偿",
+            "parameters": {
+                "grav_alpha": 1.0, "payload_kg": 0.0, "payload_com_m": None,
+                "payload_link": None, "excluded_subtree_link": None,
+                "grav_in_float": True, "use_imu_gravity": False,
+            },
+        }
+    snapshot = fetch_capability(url)
+    if not snapshot.get("available"):
+        raise ValueError(f"18000能力中心不可达，无法确认重力补偿版本：{snapshot.get('error') or '未知错误'}")
+    active = snapshot.get("active") or {}
+    if not selection:
+        if str(active.get("arm") or "").removesuffix("_arm") == arm:
+            selection = str(active.get("gravity_profile_version") or "")
+        selection = selection or str(snapshot.get("gravity_active_version") or "")
+    profile = next(
+        (item for item in snapshot["gravity_profiles"] if str(item.get("version")) == selection),
+        None,
+    )
+    if profile is None:
+        raise ValueError(f"重力补偿版本不存在：{selection or '未选择'}")
+    compatibility = profile.get("compatibility")
+    expected_arm = f"{arm}_arm"
+    if compatibility:
+        if compatibility.get("arm") != expected_arm:
+            raise ValueError(f"重力补偿版本 {selection} 不适用于{arm}臂")
+        if active.get("arm") != expected_arm or active.get("hand_id") != compatibility.get("hand_id"):
+            raise ValueError(
+                f"重力补偿版本 {selection} 仅适用于 "
+                f"{compatibility.get('arm')} + {compatibility.get('hand_id')}，与18000当前组合不一致"
+            )
+    parameters = profile.get("parameters") or {}
+    required = {"grav_alpha", "payload_kg", "grav_in_float", "use_imu_gravity"}
+    if not required.issubset(parameters):
+        raise ValueError(f"重力补偿版本 {selection} 参数不完整")
+    return {"mode": "profile", **profile}
+
+
+def gravity_profile_catalog(url: str, arm: str) -> dict[str, Any]:
+    """Profiles selectable for one arm, with 18000's active choice as default."""
+    if arm not in ARMS:
+        raise ValueError(f"arm must be left or right, got {arm!r}")
+    snapshot = fetch_capability(url)
+    if not snapshot.get("available"):
+        raise ValueError(f"18000能力中心不可达：{snapshot.get('error') or '未知错误'}")
+    active = snapshot.get("active") or {}
+    expected_arm = f"{arm}_arm"
+    profiles = []
+    for profile in snapshot.get("gravity_profiles") or []:
+        compatibility = profile.get("compatibility")
+        if compatibility:
+            if active.get("arm") != expected_arm:
+                continue
+            if compatibility.get("arm") != expected_arm:
+                continue
+            if compatibility.get("hand_id") != active.get("hand_id"):
+                continue
+        profiles.append(profile)
+    versions = {str(profile.get("version")) for profile in profiles}
+    active_version = (
+        str(active.get("gravity_profile_version") or "")
+        if active.get("arm") == expected_arm else ""
+    )
+    global_version = str(snapshot.get("gravity_active_version") or "")
+    default_version = (
+        active_version if active_version in versions
+        else global_version if global_version in versions
+        else "none"
+    )
+    return {
+        "profiles": profiles,
+        "default_version": default_version,
+        "active_version": active_version or None,
+        "active_arm": active.get("arm"),
+        "active_hand_id": active.get("hand_id"),
     }
 
 
@@ -264,6 +351,13 @@ def create_app(
     @app.get("/api/capability")
     def capability():
         return fetch_capability(config.capability_url)
+
+    @app.get("/api/gravity-profiles")
+    def gravity_profiles(arm: str):
+        try:
+            return gravity_profile_catalog(config.capability_url, arm)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
 
     @app.get("/api/joints")
     def joints(arm: str | None = None):
@@ -525,7 +619,18 @@ def create_app(
         if arm is not None and arm not in ARMS:
             raise HTTPException(422, f"arm must be left or right, got {arm!r}")
         try:
-            engine.engage(arm)
+            gravity_profile = (
+                {"mode": "base", "version": "none", "label": (
+                    "mock" if config.mock else "启动参数已关闭额外负载补偿"
+                ), "parameters": {}}
+                if config.mock or config.payload_dir is None
+                else resolve_gravity_profile(
+                    config.capability_url,
+                    str(arm or getattr(bridge, "arm", "right")),
+                    body.get("gravity_profile_version"),
+                )
+            )
+            engine.engage(arm, gravity_profile=gravity_profile)
             return {"ok": True, "arm": getattr(bridge, "arm", arm)}
         except Exception as exc:
             raise HTTPException(409, str(exc)) from exc

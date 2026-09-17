@@ -9,11 +9,15 @@ from __future__ import annotations
 import json
 import sys
 import types
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
-from calibration_replay.app import AppConfig, create_app
+import calibration_replay.app as replay_app
+import calibration_replay.bridge as bridge_module
+from calibration_replay.app import AppConfig, create_app, gravity_profile_catalog, resolve_gravity_profile
+from calibration_replay.bridge import H2ArmBridge
 from calibration_replay.payload import PayloadStore
 
 
@@ -115,3 +119,79 @@ def test_api_payload_endpoints_mock(tmp_path):
         assert info["ok"] and info["enabled"] is False and info["active"] is False
         assert client.post("/api/payload/reload").json()["active"] is False
         assert client.get("/api/status").json()["arm"]["payload"]["active"] is False
+
+
+def test_resolve_gravity_profile_uses_18000_combo_default(monkeypatch):
+    monkeypatch.setattr(replay_app, "fetch_capability", lambda _url: {
+        "available": True,
+        "active": {
+            "arm": "left_arm", "hand_id": "qiangnao-revo2-left",
+            "gravity_profile_version": "0.2.0",
+        },
+        "gravity_active_version": "0.1.0",
+        "gravity_profiles": [
+            {"version": "0.1.0", "label": "通用", "parameters": {
+                "grav_alpha": 1.1, "payload_kg": 0.5,
+                "grav_in_float": True, "use_imu_gravity": False,
+            }},
+            {"version": "0.2.0", "label": "左手", "compatibility": {
+                "arm": "left_arm", "hand_id": "qiangnao-revo2-left",
+            }, "parameters": {
+                "grav_alpha": 1.0, "payload_kg": 0.766,
+                "payload_com_m": [0.07, 0.01, 0.0],
+                "grav_in_float": True, "use_imu_gravity": False,
+            }},
+        ],
+    })
+
+    selected = resolve_gravity_profile("http://18000", "left", None)
+    assert selected["version"] == "0.2.0"
+    left_catalog = gravity_profile_catalog("http://18000", "left")
+    assert left_catalog["default_version"] == "0.2.0"
+    assert [item["version"] for item in left_catalog["profiles"]] == ["0.1.0", "0.2.0"]
+    right_catalog = gravity_profile_catalog("http://18000", "right")
+    assert right_catalog["default_version"] == "0.1.0"
+    assert [item["version"] for item in right_catalog["profiles"]] == ["0.1.0"]
+    assert resolve_gravity_profile("http://18000", "left", "none")["mode"] == "base"
+    with pytest.raises(ValueError, match="不适用于right臂"):
+        resolve_gravity_profile("http://18000", "right", "0.2.0")
+
+
+def test_h2_bridge_applies_selected_profile_before_start(monkeypatch):
+    state = {}
+
+    class Controller:
+        def __init__(self, **kwargs):
+            state["kwargs"] = kwargs
+            self.joint_names = [f"j{i}" for i in range(7)]
+            self.limits = SimpleNamespace(tolist=lambda: [[-1.0, 1.0]] * 7)
+
+        def start(self):
+            state["started"] = True
+
+        def shutdown(self):
+            state["stopped"] = True
+
+    monkeypatch.setattr(
+        bridge_module, "_module",
+        lambda _project, name: SimpleNamespace(H2ArmController=Controller) if name == "arm" else None,
+    )
+    bridge = H2ArmBridge("/unused", None)
+    bridge.engage("left", gravity_profile={
+        "mode": "profile", "version": "0.2.0", "label": "左手",
+        "parameters": {
+            "grav_alpha": 1.0, "payload_kg": 0.766,
+            "payload_com_m": [0.0774, 0.0106, -0.0069],
+            "payload_link": "left_wrist_yaw_link",
+            "excluded_subtree_link": "left_hand_link",
+            "grav_in_float": True, "use_imu_gravity": False,
+        },
+    })
+
+    assert state["started"] is True
+    assert state["kwargs"]["payload_kg"] == 0.766
+    assert state["kwargs"]["payload_com_m"] == [0.0774, 0.0106, -0.0069]
+    assert bridge.payload_info()["version"] == "0.2.0"
+    assert "file" not in bridge.payload_info()
+    bridge.disarm()
+    assert state["stopped"] is True

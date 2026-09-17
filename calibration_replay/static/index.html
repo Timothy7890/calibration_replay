@@ -159,6 +159,15 @@
         <p class="muted small">接管的是本计划的 <b>{{ armName[plan.arm] }}</b>，接管后才会发布 rt/arm_sdk。流程：<b>接管</b>（刚性保持）→ <b>拖动</b>（可用手拖臂）→ 摆到位 → <b>抓住保持</b> → <b>录为原点 / 采样点 / 过渡点</b>。采样点、过渡点按第 1 区的「自动放到最合适位置」勾选决定插入位置（当前：<b>{{ autoPlace ? '自动放置' : '追加到末尾' }}</b>）。全程有人扶臂。</p>
         <p class="hint" v-if="arm.engaged && arm.arm && arm.arm !== plan.arm">当前接管的是 <b>{{ armName[arm.arm] }}</b>，而这个计划是 <b>{{ armName[plan.arm] }}</b>：先「解除接管」，再重新接管。</p>
         <div class="toolbar">
+          <label class="inline gravity-choice" title="默认来自18000；只影响本次接管">
+            <span>重力补偿</span>
+            <select v-model="gravityVersion" :disabled="arm.engaged || gravityLoading">
+              <option v-for="p in gravityCatalog.profiles" :key="p.version" :value="String(p.version)">
+                {{ p.version === gravityCatalog.default_version ? '默认 · ' : '' }}{{ p.version }} · {{ p.label }}
+              </option>
+              <option value="none">不加载额外补偿</option>
+            </select>
+          </label>
           <button class="primary" @click="act('engage')" :disabled="arm.engaged">接管{{ armName[plan.arm] }}并保持</button>
           <button @click="act('guide')" :disabled="!arm.engaged || arm.guide">拖动模式</button>
           <button @click="act('catch')" :disabled="!arm.engaged || !arm.guide">抓住当前位置并保持</button>
@@ -191,13 +200,13 @@
             <p class="muted small" style="margin-top:8px">画面来自 18005 内置3D服务（{{ plan.base_url }}）。</p>
           </div>
         </div>
-        <!-- 2D：8131 实时画面 + 棋盘格角点叠加，录点时当取景器 -->
+        <!-- 2D：相机服务实时画面，录点时当取景器 -->
         <div class="cam" v-if="plan.target !== 'hand_eye_3D'">
           <div class="cam-view">
             <img v-if="cam.src" :src="cam.src" alt="相机画面">
-            <div v-else class="cam-empty">{{ cam.connected ? '等待相机帧（8131 未连接相机或未选择序列号）' : '正在连接 8131 画面…' }}</div>
+            <div v-else class="cam-empty">{{ cam.connected ? '等待相机帧（请检查相机连接及所选序列号）' : '正在连接相机画面…' }}</div>
             <div class="cam-badges">
-              <span class="tag" :class="cam.detected ? 'ok' : 'warn'">{{ cam.detected ? '已检出棋盘格 ✓' : '未检出棋盘格' }}</span>
+              <span class="tag" :class="cam.detected === true ? 'ok' : (cam.detected === false ? 'warn' : '')">{{ cam.detected === true ? '已检出棋盘格 ✓' : (cam.detected === false ? '未检出棋盘格' : '检测中…') }}</span>
               <span class="tag">{{ cam.connected ? '画面在线' : '画面离线' }}</span>
               <span class="tag mono" v-if="cameras2d.current_serial">{{ cameras2d.current_serial }}</span>
             </div>
@@ -212,7 +221,7 @@
               画面是 <span class="mono">{{ cameras2d.current_serial }}</span>，而本计划指定 <span class="mono">{{ plan.camera_serial }}</span>。
               <button @click="switchCamera2d(plan.camera_serial)">切到本计划相机</button>
             </div>
-            <p class="muted small" style="margin-top:8px">画面来自 8131（{{ plan.base_url }}）当前选中的相机；换相机在下方「高级参数 → 2D 相机序列号」（选择后会同时切换画面）。</p>
+            <p class="muted small" style="margin-top:8px">画面来自相机服务（{{ plan.base_url }}）当前选中的相机；换相机在下方「高级参数 → 2D 相机序列号」（选择后会同时切换画面）。</p>
           </div>
         </div>
         <div class="two">
@@ -326,7 +335,7 @@
           <div v-if="plan.target !== 'hand_eye_3D'">
             <label>2D 相机序列号 <a href="#" class="small" @click.prevent="loadCameras2d">刷新</a></label>
             <select v-model="plan.camera_serial" @change="savePlan(); plan.camera_serial && switchCamera2d(plan.camera_serial)">
-              <option :value="null">不指定（用 8131 当前相机）</option>
+              <option :value="null">不指定（用相机服务当前相机）</option>
               <option v-for="d in cameras2d.devices" :key="d.serial" :value="d.serial" :disabled="d.busy">
                 {{ d.serial }} · {{ d.name }}{{ d.current ? ' · 当前画面' : '' }}{{ d.busy ? ' · 被占用' : '' }}
               </option>
@@ -387,6 +396,6 @@
 
 <script type="importmap">{"imports":{"three":"/static/vendor/three.module.js"}}</script>
 <script src="/static/vendor/vue.global.prod.js"></script>
-<script type="module" src="/static/app.js"></script>
+<script type="module" src="/static/app.js?v=20260916-gravity-selector"></script>
 </body>
 </html>

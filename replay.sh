@@ -129,9 +129,9 @@ do_start() {
                 [[ -f "$f" ]] && found="$found ${f##*/}"
             done
             if [[ -n "$found" ]]; then
-                mode="$mode · 负载补偿:$found"
+                mode="$mode · 重力补偿:按任务选择（18000默认；旧文件仅兼容保留）"
             else
-                mode="$mode · 负载补偿: 未标定（$PAYLOAD_DIR 下无 payload_*.json，沿用原前馈）"
+                mode="$mode · 重力补偿:按任务选择（18000默认）"
             fi
         fi
     else

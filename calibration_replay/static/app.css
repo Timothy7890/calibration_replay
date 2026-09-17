@@ -54,6 +54,7 @@ details.card[open] summary{margin-bottom:10px}
 
 /* 工具条与表格 */
 .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0}.toolbar input,.toolbar select{width:auto}
+.toolbar .gravity-choice{margin:0;padding:4px 7px;border:1px solid var(--line);border-radius:7px;background:#121923}.toolbar .gravity-choice select{min-width:220px}
 .hint{background:#2a2412;border:1px solid #6b5a1e;border-radius:8px;padding:8px 12px;margin-bottom:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 table{width:100%;border-collapse:collapse;font-size:12.5px}th,td{border-bottom:1px solid var(--line);padding:5px 6px;text-align:left;vertical-align:middle}
 th{color:var(--muted);font-weight:600}

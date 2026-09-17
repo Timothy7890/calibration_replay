@@ -49,6 +49,9 @@ createApp({
     const plans = ref([]);
     const plan = ref(null);
     const capability = ref({ available: false });
+    const gravityCatalog = ref({ profiles: [], default_version: "none" });
+    const gravityVersion = ref("none");
+    const gravityLoading = ref(false);
     const newArm = ref("right");
     const status = ref({ state: "idle", message: "", progress: {}, captures: [], logs: [], arm: {} });
     const online = ref(false);
@@ -102,14 +105,21 @@ createApp({
       } catch { return ""; }
     };
 
-    // ---------- 8131 实时画面（2D 计划录点用的取景器） ----------
-    const cam = reactive({ src: "", detected: false, connected: false, boardSize: "11x8", showCorners: true });
+    // ---------- 2D 相机实时画面（计划录点用的取景器） ----------
+    const cam = reactive({ src: "", detected: null, connected: false, boardSize: "11x8", showCorners: true });
     let camWs = null, camRetry = null, camUrl = "";
+    let camObjectUrl = "";
+    const camSetFrame = (src, objectUrl = "") => {
+      const previous = camObjectUrl;
+      camObjectUrl = objectUrl;
+      cam.src = src;
+      if (previous) URL.revokeObjectURL(previous);
+    };
     const camSend = (msg) => { if (camWs && camWs.readyState === 1) camWs.send(JSON.stringify(msg)); };
     const camClose = () => {
       clearTimeout(camRetry); camRetry = null;
-      if (camWs) { camWs.onclose = null; camWs.onerror = null; camWs.close(); camWs = null; }
-      cam.connected = false; cam.src = ""; cam.detected = false;
+      if (camWs) { camWs.onopen = null; camWs.onmessage = null; camWs.onclose = null; camWs.onerror = null; camWs.close(); camWs = null; }
+      cam.connected = false; camSetFrame(""); cam.detected = null;
     };
     const camConnect = () => {
       camClose();
@@ -118,15 +128,26 @@ createApp({
       camWs.onopen = () => { cam.connected = true; camSend({ board_size: cam.boardSize, show_corners: cam.showCorners }); };
       camWs.onmessage = (ev) => {
         try {
+          // Workstation streams binary JPEG; legacy services send JSON/base64.
+          if (ev.data instanceof Blob || ev.data instanceof ArrayBuffer) {
+            const jpeg = new Blob([ev.data], { type: "image/jpeg" });
+            const url = URL.createObjectURL(jpeg);
+            camSetFrame(url, url);
+            return;
+          }
           const d = JSON.parse(ev.data);
-          if (d.left) cam.src = "data:image/jpeg;base64," + d.left;
+          if (d.type === "checkerboard_detection") {
+            cam.detected = !!d.found;
+            return;
+          }
+          if (d.left) camSetFrame("data:image/jpeg;base64," + d.left);
           cam.detected = !!d.left_detected;
         } catch { /* ignore */ }
       };
       camWs.onclose = () => { cam.connected = false; camRetry = setTimeout(camConnect, 2000); };
       camWs.onerror = () => { cam.connected = false; };
     };
-    // 计划的 base_url（如 http://127.0.0.1:8131）→ 浏览器能访问的 ws://<本页主机>:8131/ws/stream
+    // 计划的 base_url → 浏览器能访问的相机服务 /ws/stream
     watch(() => [plan.value?.id, plan.value?.target, plan.value?.base_url], () => {
       const p = plan.value;
       // 3D：切换轮询目标
@@ -243,6 +264,27 @@ createApp({
       exportResult.value = null;
       preview.value = null; previewError.value = "";
       if (viewer) viewer.pause();
+      await loadGravityProfiles();
+    }
+    async function loadGravityProfiles() {
+      if (!plan.value?.arm) return;
+      gravityLoading.value = true;
+      try {
+        const catalog = await api(`/api/gravity-profiles?arm=${encodeURIComponent(plan.value.arm)}`);
+        gravityCatalog.value = catalog;
+        const versions = new Set((catalog.profiles || []).map((profile) => String(profile.version)));
+        if (gravityVersion.value !== "none" && !versions.has(gravityVersion.value)) {
+          gravityVersion.value = catalog.default_version || "none";
+        } else if (gravityVersion.value === "none") {
+          gravityVersion.value = catalog.default_version || "none";
+        }
+      } catch (e) {
+        gravityCatalog.value = { profiles: [], default_version: "none" };
+        gravityVersion.value = "none";
+        say(`重力补偿列表不可用，已关闭额外补偿：${e.message}`, "warn", 6000);
+      } finally {
+        gravityLoading.value = false;
+      }
     }
     const savePlan = () => guard(async () => {
       const p = { ...plan.value, camera_serial: plan.value.camera_serial?.trim() || null };
@@ -454,14 +496,18 @@ createApp({
       say("已导出，去 18002 离线轨迹回放里查看", "ok", 5000);
     });
     const act = (name) => guard(async () => {
-      await post("/api/control/" + name, name === "engage" && plan.value ? { plan_id: plan.value.id } : {});
+      await post("/api/control/" + name, name === "engage" && plan.value ? {
+        plan_id: plan.value.id,
+        gravity_profile_version: gravityVersion.value || gravityCatalog.value.default_version || "none",
+      } : {});
       await refreshStatus();
     });
     // 末端负载重力补偿（arm_payload_gravity 10183 的标定结果），接管时自动加载；此处可手动重读文件
     const payload = computed(() => arm.value.payload || {});
     const payloadLabel = computed(() => {
       const p = payload.value;
-      if (!p.enabled) return "负载补偿关闭";
+      if (p.version && p.version !== "none") return `重力补偿 ${p.version}`;
+      if (!p.enabled) return "额外补偿关闭";
       if (p.active) return `负载补偿 ${Number(p.mass_kg).toFixed(2)} kg · α${Number(p.alpha).toFixed(2)}`;
       const f = p.file || {};
       if (f.exists) return `负载补偿待加载 ${Number(f.mass_kg).toFixed(2)} kg`;
@@ -470,6 +516,7 @@ createApp({
     const payloadTitle = computed(() => {
       const p = payload.value, f = p.file || {};
       const lines = [];
+      if (p.version && p.version !== "none") lines.push(`${p.version} · ${p.label || "重力补偿"}`);
       if (p.active) lines.push(`已注入：m=${Number(p.mass_kg).toFixed(3)} kg  质心=[${(p.com_m || []).map((v) => Number(v).toFixed(3)).join(", ")}] m  α=${Number(p.alpha).toFixed(3)}`, `来源 ${p.source_session || "?"} · 应用于 ${p.applied_at || "?"}`);
       else if (p.reason) lines.push(p.reason);
       if (f.path) lines.push(`文件 ${f.path}${f.exists ? "" : "（不存在）"}`);
@@ -518,7 +565,7 @@ createApp({
 
     return {
       stateName, targetName, armName, otherArm, plans, plan, status, online, joints, validation, exportResult, toast,
-      capability, newArm, mirrorPlan, setArm,
+      capability, gravityCatalog, gravityVersion, gravityLoading, newArm, mirrorPlan, setArm,
       newName, newTarget, import3dDir, import3dResult, import2dDir, import2dTarget, cameras2d, loadCameras2d, switchCamera2d, cam, camSend, cam3d, cam3dLoaded, cam3dFailed, nodeName, manualQ, manualRole, exportDir, runId,
       arm, running, home, homeDelta, deltas, gaps, steps, logText,
       fmt, fmtQ, parseQ, shortJoint, summarize,

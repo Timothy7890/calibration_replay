@@ -98,7 +98,7 @@ class MockArmBridge:
         self.arm = arm
         self.joint_names = joint_names_for(arm)
 
-    def engage(self, arm: str | None = None) -> None:
+    def engage(self, arm: str | None = None, gravity_profile: dict | None = None) -> None:
         if arm is not None:
             self.select_arm(arm)
         self._engaged = True
@@ -180,6 +180,7 @@ class H2ArmBridge:
         self._lock = threading.RLock()
         # 末端负载重力补偿（arm_payload_gravity 标定结果）；None = 禁用，沿用作者原前馈
         self.payload_store = payload_store or PayloadStore(None, None)
+        self._gravity_profile: dict[str, Any] | None = None
         self._payload: dict[str, Any] = {"enabled": self.payload_store.enabled, "active": False, "arm": arm,
                                          "reason": "未接管"}
 
@@ -219,12 +220,15 @@ class H2ArmBridge:
             raise RuntimeError("还没收到 rt/lowstate")
         return [float(state.motor_state[i].q) for i in indices]
 
-    def engage(self, arm: str | None = None) -> None:
+    def engage(self, arm: str | None = None, gravity_profile: dict | None = None) -> None:
         with self._lock:
             if arm is not None:
                 self.select_arm(arm)
             if self._controller is not None:
+                if gravity_profile != self._gravity_profile:
+                    raise RuntimeError("机械臂已接管；切换重力补偿前请先解除接管")
                 return
+            self._gravity_profile = gravity_profile
             arm_module = _module(self.project, "arm")
 
             class TimestampedH2ArmController(arm_module.H2ArmController):
@@ -233,6 +237,25 @@ class H2ArmBridge:
                     inner_self._calibration_gyro = _imu_gyro(message)
                     super()._on_low_state(message)
 
+            profile_parameters = (
+                dict(gravity_profile.get("parameters") or {})
+                if gravity_profile is not None else None
+            )
+            gravity_parameters = {
+                "grav_alpha": 1.0,
+                "payload_kg": 0.0,
+                "payload_com_m": None,
+                "payload_link": None,
+                "excluded_subtree_link": None,
+                "grav_in_float": True,
+                "use_imu_gravity": False,
+            }
+            if profile_parameters:
+                gravity_parameters.update({
+                    key: profile_parameters.get(key)
+                    for key in gravity_parameters
+                    if key in profile_parameters
+                })
             controller = TimestampedH2ArmController(
                 arm=self.arm,
                 network_interface=self.network_interface,
@@ -243,12 +266,35 @@ class H2ArmBridge:
                 kp_wrist=ARM_KP_WRIST,
                 kd_wrist=ARM_KD_WRIST,
                 hand_move_kd=2.0,
-                grav_alpha=1.0,
-                payload_kg=0.0,
-                grav_in_float=True,
+                **gravity_parameters,
             )
             # 负载补偿在 start() 前注入：控制线程第一周期就带负载前馈，接管瞬间不会先下垂再抬起
-            self._payload = self.payload_store.apply(controller, self.arm)
+            if gravity_profile is None:
+                self._payload = self.payload_store.apply(controller, self.arm)
+            elif gravity_profile.get("mode") == "profile":
+                self._payload = {
+                    "enabled": True,
+                    "active": True,
+                    "arm": self.arm,
+                    "source": "18000_gravity_profile",
+                    "version": gravity_profile.get("version"),
+                    "label": gravity_profile.get("label"),
+                    "mass_kg": gravity_parameters["payload_kg"],
+                    "com_m": gravity_parameters["payload_com_m"],
+                    "alpha": gravity_parameters["grav_alpha"],
+                    "parameters": gravity_parameters,
+                }
+            else:
+                self._payload = {
+                    "enabled": False,
+                    "active": False,
+                    "arm": self.arm,
+                    "source": "task_override",
+                    "version": "none",
+                    "label": "不加载额外负载补偿",
+                    "reason": "本次任务保留机器人基础重力前馈，不加载额外负载补偿",
+                    "parameters": gravity_parameters,
+                }
             controller.start()
             self._controller = controller
             self.joint_names = list(controller.joint_names)
@@ -257,6 +303,7 @@ class H2ArmBridge:
     def disarm(self) -> None:
         with self._lock:
             controller, self._controller = self._controller, None
+            self._gravity_profile = None
             self._payload = {"enabled": self.payload_store.enabled, "active": False, "arm": self.arm, "reason": "未接管"}
         if controller is not None:
             controller.shutdown()
@@ -264,13 +311,17 @@ class H2ArmBridge:
     def payload_info(self) -> dict[str, Any]:
         with self._lock:
             info = dict(self._payload)
-        info["file"] = self.payload_store.describe_file(self.arm)
+            profile_mode = self._gravity_profile is not None
+        if not profile_mode:
+            info["file"] = self.payload_store.describe_file(self.arm)
         return info
 
     def reload_payload(self) -> dict[str, Any]:
         """重新读 payload_<arm>.json 并热替换前馈（10183 里「应用并保存」之后调用，不必解除接管）。"""
         with self._lock:
             controller = self._controller
+            if self._gravity_profile is not None:
+                return self.payload_info()
             if controller is None:
                 self._payload = {"enabled": self.payload_store.enabled, "active": False, "arm": self.arm,
                                  "reason": "未接管；接管时会自动加载"}

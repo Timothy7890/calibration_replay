@@ -126,11 +126,11 @@ class ReplayEngine:
                 raise RuntimeError("cannot switch arm during a run")
         self.bridge.select_arm(arm)
 
-    def engage(self, arm: str | None = None) -> None:
+    def engage(self, arm: str | None = None, gravity_profile: dict | None = None) -> None:
         with self._lock:
             if self._state in {"moving", "settling", "capturing", "returning", "paused"}:
                 raise RuntimeError("cannot engage during a run")
-        self.bridge.engage(arm)
+        self.bridge.engage(arm, gravity_profile=gravity_profile)
         self._set_state("armed", f"{self._arm_label()}已接管并保持；操作员必须留在控制位置。")
 
     def disarm(self) -> None:
@@ -307,6 +307,10 @@ class ReplayEngine:
             "run_id": run_id,
             "run_dir": run_dir,
             "plan": plan.to_dict(),
+            "gravity_profile": (
+                self.bridge.payload_info()
+                if hasattr(self.bridge, "payload_info") else None
+            ),
             "started_at": datetime.now(timezone.utc).isoformat(),
             "captures": [],
             "certificates": [],
